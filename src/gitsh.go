@@ -1,6 +1,7 @@
 package gitreviewers
 
 import (
+	"fmt"
 	"os/exec"
 	rx "regexp"
 	"strconv"
@@ -18,6 +19,8 @@ func runCommand(command string) (string, error) {
 	out, err := exec.Command(tokens[0], tokens[1:]...).CombinedOutput()
 
 	if err != nil {
+		fmt.Println("Git error!")
+		fmt.Println(string(out))
 		return "", err
 	}
 
@@ -44,17 +47,22 @@ func changedFiles() ([]string, error) {
 func committerCounts(path string) ([]CommitterStat, error) {
 	var stats []CommitterStat
 
+	sinceCommit, err := exec.Command(
+		"bash", "-c", "git log --since 2015-01-01 --reverse |"+
+			"head -n 1 | awk '{print $2}'").Output()
+
+	if err != nil {
+		return stats, err
+	}
+
 	cmd := strings.Join(
 		[]string{
 			"git shortlog -sne --no-merges",
-			"$(git log --since 2015-01-01 --until 2015-01-31 --reverse |",
-			"head -n 1 | awk '{pring $2}')..HEAD",
+			strings.TrimSpace(string(sinceCommit)) + "..HEAD",
 			path,
-			"2>&1",
 		}, " ")
 
 	out, err := runCommand(cmd)
-
 	if err != nil {
 		return stats, err
 	}
