@@ -28,7 +28,13 @@ func runCommand(command string) (string, error) {
 }
 
 func commitTimeStamp(branch string) (string, error) {
-	return runCommand("git show --format=\"%ct\" " + branch)
+	out, err := runCommand("git show --format=\"%ct\" " + branch)
+	if err != nil {
+		return "", nil
+	}
+
+	line := strings.Split(out, "\n")[0]
+	return strings.Trim(line, "\""), nil
 }
 
 func changedFiles() ([]string, error) {

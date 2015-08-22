@@ -2,7 +2,9 @@ package gitreviewers
 
 import (
 	"os"
+	"strconv"
 	"testing"
+	"time"
 )
 
 func TestChangedFiles(t *testing.T) {
@@ -36,4 +38,20 @@ func TestCommitterCounts(t *testing.T) {
 	if counts[0].Reviewer == "" || counts[0].Count == 0 {
 		t.Errorf("Got empty stats where we didn't expect to")
 	}
+}
+
+func TestCommitTimestamp(t *testing.T) {
+	ts, err := commitTimeStamp("master")
+
+	if err != nil {
+		t.Errorf("Got error %v, expected none\n", err)
+		t.FailNow()
+	}
+
+	tsi, err := strconv.ParseInt(ts, 10, 64)
+	if err != nil {
+		t.Errorf("Unable to turn timestamp into integer: %v\n", err)
+	}
+	// As long as we parse into some kind of date without issue, we're ok
+	time.Unix(tsi, 0)
 }
