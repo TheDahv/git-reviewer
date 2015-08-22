@@ -39,7 +39,9 @@ func changedFiles() ([]string, error) {
 		return lines, err
 	}
 
-	lines = strings.Split(out, "\n")
+	for _, line := range strings.Split(out, "\n") {
+		lines = append(lines, strings.Trim(line, " "))
+	}
 
 	return lines, err
 }
@@ -67,8 +69,8 @@ func committerCounts(path string) ([]CommitterStat, error) {
 		return stats, err
 	}
 
-	lines := strings.Split(out, "\n")
-	for _, line := range lines {
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.Trim(line, " ")
 		matches := countExtractor.FindStringSubmatch(line)
 		if len(matches) < 3 {
 			continue
