@@ -2,12 +2,79 @@ package gitreviewers
 
 import (
 	"os"
+	"os/exec"
 	"strconv"
 	"testing"
 	"time"
 )
 
 func TestChangedFiles(t *testing.T) {
+	// Set up a fake commit in a fake branch
+	tfName := "fake.co"
+	var safeToReset = false
+
+	// Get current branch
+	out, e := exec.Command("git", "status", "-sb").Output()
+	if e != nil {
+		t.Error("Issue getting current branch")
+		t.FailNow()
+	}
+	// Find the newline
+	nlPos := 0
+	for i, b := range out {
+		nlPos = i
+		if b == '\n' {
+			break
+		}
+	}
+	// git status -sb format:
+	// ## branch_name\nsome other stuff
+	branch := string(out[3:nlPos])
+
+	if err := exec.Command("git", "checkout", "-b", "fake-branch").Run(); err != nil {
+		t.Error("Issue creating new branch. Please clean up!")
+		t.FailNow()
+	}
+
+	var f *os.File
+	var err error
+
+	defer func(safeToReset *bool, f *os.File, branch string) {
+		if f != nil {
+			_ = os.Remove(f.Name())
+		}
+
+		if *safeToReset {
+			if err := exec.Command("git", "checkout", branch).Run(); err != nil {
+				t.Error("Issue switching back to master. Please clean up!")
+				t.FailNow()
+			}
+
+			if err := exec.Command("git", "branch", "-D", "fake-branch").Run(); err != nil {
+				t.Error("Issue destroying test branch. Please clean up!")
+				t.FailNow()
+			}
+		}
+	}(&safeToReset, f, branch)
+
+	f, err = os.Create(tfName)
+	if err != nil {
+		t.Error("Issue setting up fake commit file. Please clean up!")
+		t.FailNow()
+	}
+
+	if err := exec.Command("git", "add", tfName).Run(); err != nil {
+		t.Error("Issue staging the commit. Please clean up!")
+		t.FailNow()
+	}
+
+	if err := exec.Command("git", "commit", "-m", "\"Fake commit\"").Run(); err != nil {
+		t.Error("Issue committing. Please clean up!")
+		t.FailNow()
+	}
+	safeToReset = true
+
+	// Test for changes
 	lines, err := changedFiles()
 
 	if err != nil {

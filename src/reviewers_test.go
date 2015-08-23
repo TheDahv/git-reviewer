@@ -1,6 +1,9 @@
 package gitreviewers
 
-import "testing"
+import (
+	"sort"
+	"testing"
+)
 
 func TestMergeStats(t *testing.T) {
 	statGroups := []Stats{
@@ -10,16 +13,17 @@ func TestMergeStats(t *testing.T) {
 		},
 		Stats{
 			Stat{"a", 3},
-			Stat{"c", 4},
+			Stat{"c", 5},
 		},
 	}
 
 	expected := Stats{
 		Stat{"b", 2},
-		Stat{"c", 4},
 		Stat{"a", 4},
+		Stat{"c", 5},
 	}
 	actual := mergeStats(statGroups)
+	sort.Sort(actual)
 
 	for i, actualStat := range actual {
 		if actualStat != expected[i] {
