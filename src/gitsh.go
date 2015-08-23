@@ -1,7 +1,6 @@
 package gitreviewers
 
 import (
-	"fmt"
 	"os/exec"
 	rx "regexp"
 	"strconv"
@@ -15,12 +14,12 @@ func init() {
 }
 
 func runCommand(command string) (string, error) {
+	// TODO Output command in verbose mode
 	tokens := strings.Split(command, " ")
 	out, err := exec.Command(tokens[0], tokens[1:]...).CombinedOutput()
 
 	if err != nil {
-		fmt.Println("Git error!")
-		fmt.Println(string(out))
+		// TODO Output error in verbose mode
 		return "", err
 	}
 
