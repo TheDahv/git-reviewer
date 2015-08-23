@@ -54,7 +54,7 @@ func changedFiles() ([]string, error) {
 	return lines, err
 }
 
-func committerCounts(path string) ([]CommitterStat, error) {
+func committerCounts(path string) (Stats, error) {
 	var stats []CommitterStat
 
 	sinceCommit, err := exec.Command(
