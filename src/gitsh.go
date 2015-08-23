@@ -46,7 +46,10 @@ func changedFiles() ([]string, error) {
 	}
 
 	for _, line := range strings.Split(out, "\n") {
-		lines = append(lines, strings.Trim(line, " "))
+		l := strings.Trim(line, " ")
+		if len(l) > 0 {
+			lines = append(lines, l)
+		}
 	}
 
 	return lines, err
