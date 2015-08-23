@@ -5,19 +5,19 @@ import "testing"
 func TestMergeStats(t *testing.T) {
 	statGroups := []Stats{
 		Stats{
-			CommitterStat{"a", 1},
-			CommitterStat{"b", 2},
+			Stat{"a", 1},
+			Stat{"b", 2},
 		},
 		Stats{
-			CommitterStat{"a", 3},
-			CommitterStat{"c", 4},
+			Stat{"a", 3},
+			Stat{"c", 4},
 		},
 	}
 
 	expected := Stats{
-		CommitterStat{"a", 4},
-		CommitterStat{"b", 2},
-		CommitterStat{"c", 4},
+		Stat{"b", 2},
+		Stat{"c", 4},
+		Stat{"a", 4},
 	}
 	actual := mergeStats(statGroups)
 

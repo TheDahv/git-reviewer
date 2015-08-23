@@ -5,38 +5,50 @@ import (
 	"sort"
 )
 
-type CommitterStat struct {
+// Stat contains contributor name and commit count summary. It is
+// well-suited for capturing information returned from git shortlog.
+type Stat struct {
 	Reviewer string
 	Count    int
 }
 
-func (cs *CommitterStat) String() string {
+// String shows Stat information in a format suitable for shell reporting.
+func (cs *Stat) String() string {
 	return fmt.Sprintf("  %d\t%s", cs.Count, cs.Reviewer)
 }
 
-// Sortable Stats
-type Stats []CommitterStat
+// Stats is a convenience type that lets us implement the sortable interface.
+type Stats []Stat
 
+// Len returns the number of Stat objects.
 func (s Stats) Len() int {
 	return len(s)
 }
 
+// Less sorts Stats by the commit count in each Stat.
 func (s Stats) Less(i, j int) bool {
 	return s[i].Count < s[j].Count
 }
 
+// Swap implements in-place sorting.
 func (s Stats) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 
+// BranchBehind is not yet implemented. Determines if the current branch
+// behind master and requires that it be "merged up".
 func BranchBehind() bool {
 	return false
 }
 
+// FindFiles returns a list of paths to files that have been changed
+// in this branch.
 func FindFiles() ([]string, error) {
 	return changedFiles()
 }
 
+// mergeStats takes a list of stats and groups them by Reviewer, summing
+// total commit count for each. A new Stats with all data merged is returned.
 func mergeStats(stats []Stats) Stats {
 	var final Stats
 	reviewers := make(map[string]int)
@@ -48,12 +60,14 @@ func mergeStats(stats []Stats) Stats {
 	}
 
 	for reviewer, count := range reviewers {
-		final = append(final, CommitterStat{reviewer, count})
+		final = append(final, Stat{reviewer, count})
 	}
 
 	return final
 }
 
+// FindReviewers returns up to 3 of the top reviewers information as determined
+// by cumulative commit count across all files in `paths`.
 func FindReviewers(paths []string) ([]string, error) {
 	var (
 		finalStats Stats

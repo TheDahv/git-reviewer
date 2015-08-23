@@ -10,12 +10,16 @@ import (
 var countExtractor *rx.Regexp
 
 func init() {
+	// Pattern to extract commit count and name/email from git shortlog.
 	countExtractor = rx.MustCompile("(\\d+)\\s*(.*)$")
 }
 
-func runCommand(command string) (string, error) {
+// run executes cmd via a shell process and returns
+// its output as a string. If the shell returns an error, return
+// that instead.
+func run(cmd string) (string, error) {
 	// TODO Output command in verbose mode
-	tokens := strings.Split(command, " ")
+	tokens := strings.Split(cmd, " ")
 	out, err := exec.Command(tokens[0], tokens[1:]...).CombinedOutput()
 
 	if err != nil {
@@ -26,8 +30,10 @@ func runCommand(command string) (string, error) {
 	return string(out), nil
 }
 
-func commitTimeStamp(branch string) (string, error) {
-	out, err := runCommand("git show --format=\"%ct\" " + branch)
+// commitTimeStamp returns the timestamp of the current commit for
+// the object (branch, commit, etc.).
+func commitTimeStamp(obj string) (string, error) {
+	out, err := run("git show --format=\"%ct\" " + obj)
 	if err != nil {
 		return "", nil
 	}
@@ -36,9 +42,11 @@ func commitTimeStamp(branch string) (string, error) {
 	return strings.Trim(line, "\""), nil
 }
 
+// changedFiles returns the paths of all files changed in commits between
+// master and the current branch.
 func changedFiles() ([]string, error) {
 	var lines []string
-	out, err := runCommand("git diff master HEAD --name-only")
+	out, err := run("git diff master HEAD --name-only")
 
 	if err != nil {
 		return lines, err
@@ -54,10 +62,14 @@ func changedFiles() ([]string, error) {
 	return lines, err
 }
 
+// committerCounts returns recent committers and commit counts for
+// the file at `path`.
 func committerCounts(path string) (Stats, error) {
-	var stats []CommitterStat
+	var stats []Stat
 
-	sinceCommit, err := exec.Command(
+	// TODO Parse "since" date from options or calculate from current
+	// date if not specified
+	since, err := exec.Command(
 		"bash", "-c", "git log --since 2015-01-01 --reverse |"+
 			"head -n 1 | awk '{print $2}'").Output()
 
@@ -68,11 +80,11 @@ func committerCounts(path string) (Stats, error) {
 	cmd := strings.Join(
 		[]string{
 			"git shortlog -sne --no-merges",
-			strings.TrimSpace(string(sinceCommit)) + "..HEAD",
+			strings.TrimSpace(string(since)) + "..HEAD",
 			path,
 		}, " ")
 
-	out, err := runCommand(cmd)
+	out, err := run(cmd)
 	if err != nil {
 		return stats, err
 	}
@@ -92,7 +104,7 @@ func committerCounts(path string) (Stats, error) {
 			continue
 		}
 
-		stats = append(stats, CommitterStat{rvwr, cti})
+		stats = append(stats, Stat{rvwr, cti})
 	}
 
 	return stats, nil

@@ -7,6 +7,7 @@ import (
 )
 
 func main() {
+	// Find changed files in this branch.
 	files, err := gitreviewers.FindFiles()
 
 	if err != nil {
@@ -19,6 +20,7 @@ func main() {
 		fmt.Printf("  %s\n", file)
 	}
 
+	// Find the best reviewers for these files.
 	reviewers, err := gitreviewers.FindReviewers(files)
 	if err != nil {
 		fmt.Printf("There was an error finding reviewers: %v\n", err)
