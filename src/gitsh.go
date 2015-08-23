@@ -11,7 +11,7 @@ import (
 var countExtractor *rx.Regexp
 
 func init() {
-	countExtractor = rx.MustCompile("(\\d)+\\s*(.*)$")
+	countExtractor = rx.MustCompile("(\\d+)\\s*(.*)$")
 }
 
 func runCommand(command string) (string, error) {
