@@ -7,6 +7,17 @@ import (
 )
 
 func main() {
+	// Determine if branch is reviewable
+	if behind, err := gitreviewers.BranchBehind(); behind || err != nil {
+		if err != nil {
+			fmt.Printf("There was an error determining branch state: %v\n", err)
+			return
+		}
+
+		fmt.Print("Current branch is behind master. Merge up!")
+		return
+	}
+
 	// Find changed files in this branch.
 	files, err := gitreviewers.FindFiles()
 

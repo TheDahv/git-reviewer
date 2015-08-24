@@ -44,8 +44,19 @@ func (s Stats) Swap(i, j int) {
 
 // BranchBehind is not yet implemented. Determines if the current branch
 // behind master and requires that it be "merged up".
-func BranchBehind() bool {
-	return false
+func BranchBehind() (bool, error) {
+	var master, current string
+	var err error
+
+	if master, err = commitTimeStamp("master"); err != nil {
+		return false, err
+	}
+
+	if current, err = commitTimeStamp("HEAD"); err != nil {
+		return false, err
+	}
+
+	return current < master, nil
 }
 
 // FindFiles returns a list of paths to files that have been changed
