@@ -15,6 +15,11 @@ func main() {
 		return
 	}
 
+	if len(files) == 0 {
+		fmt.Println("No changes on this branch!")
+		return
+	}
+
 	fmt.Println("Reviewers across the following changed files:")
 	for _, file := range files {
 		fmt.Printf("  %s\n", file)
