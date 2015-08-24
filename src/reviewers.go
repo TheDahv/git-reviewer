@@ -12,6 +12,13 @@ type Stat struct {
 	Count    int
 }
 
+// Carries information for the completion and possible error of
+// a stat finder process.
+type statResp struct {
+	path string
+	err  error
+}
+
 // String shows Stat information in a format suitable for shell reporting.
 func (cs *Stat) String() string {
 	return fmt.Sprintf("  %d\t%s", cs.Count, cs.Reviewer)
@@ -72,21 +79,41 @@ func FindReviewers(paths []string) ([]string, error) {
 	var (
 		finalStats Stats
 		results    []string
-		statGroups []Stats
 	)
 
+	merged := make(map[string]int)
+	statCh := make(chan Stat)
+	opCh := make(chan statResp)
+
 	for _, path := range paths {
-		stats, err := committerCounts(path)
-		if err != nil {
-			// This path must not exist upstream, so lets skip it
-			fmt.Println("Skipping " + path)
-			continue
-		}
-		statGroups = append(statGroups, stats)
+		go func(path string) {
+			committerCounts(path, statCh, opCh)
+		}(path)
 	}
 
-	// Turn map back into Stats so we can sort
-	finalStats = mergeStats(statGroups)
+	// Loop and merge stats into single map until all ops are done
+	for i := 0; i < len(paths); {
+		select {
+		case stat := <-statCh:
+			merged[stat.Reviewer] += stat.Count
+		case signal := <-opCh:
+			if signal.err != nil {
+				// This path must not exist upstream, so lets skip it
+				fmt.Println("Skipping " + signal.path)
+			}
+
+			i++
+		}
+	}
+
+	close(statCh)
+	close(opCh)
+
+	// Convert merged into Stats[]
+	for reviewer, count := range merged {
+		finalStats = append(finalStats, Stat{reviewer, count})
+	}
+
 	sort.Sort(sort.Reverse(finalStats))
 
 	// Grab top 3 reviewers and return string lines

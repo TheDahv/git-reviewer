@@ -62,10 +62,14 @@ func changedFiles() ([]string, error) {
 	return lines, err
 }
 
-// committerCounts returns recent committers and commit counts for
-// the file at `path`.
-func committerCounts(path string) (Stats, error) {
-	var stats []Stat
+// committerCounts finds recent committers and commit counts for
+// the file at `path`. It uses 2 channels to communicate the state of
+// processing.
+//
+// `stat` emits committer statistics as they are found for each file.
+// `done` emits once with a possible error to signal completion.
+func committerCounts(path string, stat chan Stat, done chan statResp) {
+	var signal = statResp{path: path}
 
 	// TODO Parse "since" date from options or calculate from current
 	// date if not specified
@@ -74,7 +78,8 @@ func committerCounts(path string) (Stats, error) {
 			"head -n 1 | awk '{print $2}'").Output()
 
 	if err != nil {
-		return stats, err
+		signal.err = err
+		done <- signal
 	}
 
 	cmd := strings.Join(
@@ -86,7 +91,8 @@ func committerCounts(path string) (Stats, error) {
 
 	out, err := run(cmd)
 	if err != nil {
-		return stats, err
+		signal.err = err
+		done <- signal
 	}
 
 	for _, line := range strings.Split(out, "\n") {
@@ -104,8 +110,8 @@ func committerCounts(path string) (Stats, error) {
 			continue
 		}
 
-		stats = append(stats, Stat{rvwr, cti})
+		stat <- Stat{rvwr, cti}
 	}
 
-	return stats, nil
+	done <- signal
 }
