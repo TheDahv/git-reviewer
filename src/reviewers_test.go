@@ -35,30 +35,15 @@ func TestMergeStats(t *testing.T) {
 	}
 }
 
-type runGuard struct {
-	err error
-	msg string
-}
-
-func maybeRun(rg runGuard, fn func()) {
-	if rg.err != nil {
-		return
-	}
-
-	fn()
-}
-
 func TestBranchBehind(t *testing.T) {
 	var (
 		currentBranch   string
-		requiresUnstash bool
+		requiresUnstash = true
 		rg              runGuard
 	)
 
-	requiresUnstash = true
-
 	// Get current branch
-	maybeRun(rg, func() {
+	rg.maybeRun(func() {
 		out, err := exec.Command("git", "status", "-sb").Output()
 		if err != nil {
 			rg.err = err
@@ -78,7 +63,7 @@ func TestBranchBehind(t *testing.T) {
 	})
 
 	// Stash existing workspace
-	maybeRun(rg, func() {
+	rg.maybeRun(func() {
 		out, err := exec.Command("git", "stash", "-u").Output()
 		if err != nil {
 			rg.err = err
@@ -91,7 +76,7 @@ func TestBranchBehind(t *testing.T) {
 	})
 
 	// Checkout to new branch
-	maybeRun(rg, func() {
+	rg.maybeRun(func() {
 		err := exec.Command("git", "checkout", "-b", currentBranch+"__behind").Run()
 		if err != nil {
 			rg.err = err
@@ -100,7 +85,7 @@ func TestBranchBehind(t *testing.T) {
 	})
 
 	// Drop a few commits
-	maybeRun(rg, func() {
+	rg.maybeRun(func() {
 		err := exec.Command("git", "reset", "--hard", "master~1").Run()
 		if err != nil {
 			rg.err = err
@@ -109,7 +94,7 @@ func TestBranchBehind(t *testing.T) {
 	})
 
 	// Check branch state
-	maybeRun(rg, func() {
+	rg.maybeRun(func() {
 		behind, err := BranchBehind()
 
 		if err != nil {
@@ -123,7 +108,7 @@ func TestBranchBehind(t *testing.T) {
 	})
 
 	// Go back to original working branch
-	maybeRun(rg, func() {
+	rg.maybeRun(func() {
 		err := exec.Command("git", "checkout", currentBranch).Run()
 		if err != nil {
 			rg.err = err
@@ -132,7 +117,7 @@ func TestBranchBehind(t *testing.T) {
 	})
 
 	// Restore workspace
-	maybeRun(rg, func() {
+	rg.maybeRun(func() {
 		if !requiresUnstash {
 			// Bail early if we don't have to do any work
 			fmt.Println("Skipping unstash")
@@ -147,7 +132,7 @@ func TestBranchBehind(t *testing.T) {
 	})
 
 	// Destroy test branch
-	maybeRun(rg, func() {
+	rg.maybeRun(func() {
 		err := exec.Command("git", "branch", "-D", currentBranch+"__behind").Run()
 		if err != nil {
 			rg.err = err
@@ -156,6 +141,6 @@ func TestBranchBehind(t *testing.T) {
 	})
 
 	if rg.err != nil {
-		t.Errorf("Test failed on step %s with error: %v\n", rg.msg, rg.err)
+		t.Errorf("Test setup/teardown failed on step %s with error: %v\n", rg.msg, rg.err)
 	}
 }

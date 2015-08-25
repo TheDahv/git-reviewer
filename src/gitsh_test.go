@@ -1,6 +1,7 @@
 package gitreviewers
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
@@ -11,78 +12,113 @@ import (
 func TestChangedFiles(t *testing.T) {
 	// Set up a fake commit in a fake branch
 	tfName := "fake.co"
-	var safeToReset = false
+	var (
+		safeToReset = false
+		rg          runGuard
+		branch      string
+	)
 
 	// Get current branch
-	out, e := exec.Command("git", "status", "-sb").Output()
-	if e != nil {
-		t.Error("Issue getting current branch")
-		t.FailNow()
-	}
-	// Find the newline
-	nlPos := 0
-	for i, b := range out {
-		nlPos = i
-		if b == '\n' {
-			break
+	rg.maybeRun(func() {
+		out, err := exec.Command("git", "status", "-sb").Output()
+		if err != nil {
+			rg.err = err
+			rg.msg = "Issue getting current branch"
 		}
-	}
-	// git status -sb format:
-	// ## branch_name\nsome other stuff
-	branch := string(out[3:nlPos])
+		// Find the newline
+		nlPos := 0
+		for i, b := range out {
+			nlPos = i
+			if b == '\n' {
+				break
+			}
+		}
+		// git status -sb format:
+		// ## branch_name\nsome other stuff
+		branch = string(out[3:nlPos])
+	})
 
-	if err := exec.Command("git", "checkout", "-b", "fake-branch").Run(); err != nil {
-		t.Error("Issue creating new branch. Please clean up!")
-		t.FailNow()
-	}
+	// Create test branch
+	rg.maybeRun(func() {
+		err := exec.Command("git", "checkout", "-b", "fake-branch").Run()
+
+		if err != nil {
+			rg.err = err
+			rg.msg = "Issue creating new branch. Please clean up!"
+		}
+	})
 
 	var f *os.File
-	var err error
 
-	defer func(safeToReset *bool, f *os.File, branch string) {
+	// Create a test file
+	rg.maybeRun(func() {
+		file, err := os.Create(tfName)
+		if err != nil {
+			rg.err = err
+			rg.msg = "Issue setting up fake commit file. Please clean up!"
+		} else {
+			f = file
+		}
+	})
+	defer func() {
 		if f != nil {
 			_ = os.Remove(f.Name())
 		}
+	}()
 
-		if *safeToReset {
-			if err := exec.Command("git", "checkout", branch).Run(); err != nil {
-				t.Error("Issue switching back to master. Please clean up!")
-				t.FailNow()
-			}
-
-			if err := exec.Command("git", "branch", "-D", "fake-branch").Run(); err != nil {
-				t.Error("Issue destroying test branch. Please clean up!")
-				t.FailNow()
-			}
+	// Stage the fake file
+	rg.maybeRun(func() {
+		err := exec.Command("git", "add", tfName).Run()
+		if err != nil {
+			rg.err = err
+			rg.msg = "Issue staging the commit. Please clean up!"
 		}
-	}(&safeToReset, f, branch)
+	})
 
-	f, err = os.Create(tfName)
-	if err != nil {
-		t.Error("Issue setting up fake commit file. Please clean up!")
-		t.FailNow()
-	}
-
-	if err := exec.Command("git", "add", tfName).Run(); err != nil {
-		t.Error("Issue staging the commit. Please clean up!")
-		t.FailNow()
-	}
-
-	if err := exec.Command("git", "commit", "-m", "\"Fake commit\"").Run(); err != nil {
-		t.Error("Issue committing. Please clean up!")
-		t.FailNow()
-	}
-	safeToReset = true
+	// Commit the fake file
+	rg.maybeRun(func() {
+		err := exec.Command("git", "commit", "-m", "\"Fake commit\"").Run()
+		if err != nil {
+			rg.err = err
+			rg.msg = "Issue committing. Please clean up!"
+		}
+		safeToReset = true
+	})
 
 	// Test for changes
-	lines, err := changedFiles()
+	rg.maybeRun(func() {
+		lines, err := changedFiles()
+		if err != nil {
+			t.Errorf("Got error %v, expected none\n", err)
+		}
 
-	if err != nil {
-		t.Errorf("Got error %v, expected none\n", err)
-	}
+		if len(lines) == 0 {
+			t.Error("Got 0 lines, expected more")
+		}
+	})
 
-	if len(lines) == 0 {
-		t.Error("Got 0 lines, expected more")
+	// Clean up
+
+	// Switch back to original branch
+	rg.maybeRun(func() {
+		if safeToReset {
+			if err := exec.Command("git", "checkout", branch).Run(); err != nil {
+				rg.err = err
+				rg.msg = fmt.Sprintf("Issue switching back to %s. Please clean up!", branch)
+			}
+		}
+	})
+
+	// Destroy test branch
+	rg.maybeRun(func() {
+		if err := exec.Command("git", "branch", "-D", "fake-branch").Run(); err != nil {
+			rg.err = err
+			rg.msg = "Issue destroying test branch. Please clean up!"
+		}
+	})
+
+	if rg.err != nil {
+		t.Errorf("Test setup/teardown failed on step %s with error: %v\n", rg.msg, rg.err)
 	}
 }
 
