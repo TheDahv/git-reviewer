@@ -10,6 +10,7 @@ import (
 func main() {
 	showFiles := flag.Bool("show-files", false, "Show changed files for reviewing")
 	verbose := flag.Bool("verbose", false, "Show progress and errors information")
+	force := flag.Bool("force", false, "Continue processing despite checks or errors")
 
 	flag.Parse()
 
@@ -23,7 +24,9 @@ func main() {
 		}
 
 		fmt.Print("Current branch is behind master. Merge up!")
-		return
+		if *force {
+			return
+		}
 	}
 
 	// Find changed files in this branch.
