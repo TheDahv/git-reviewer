@@ -42,9 +42,14 @@ func (s Stats) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 
+// Reviewer manages the operations and sequencing of the branch reviewer
+type Reviewer struct {
+	ShowFiles bool
+}
+
 // BranchBehind is not yet implemented. Determines if the current branch
 // behind master and requires that it be "merged up".
-func BranchBehind() (bool, error) {
+func (r *Reviewer) BranchBehind() (bool, error) {
 	var master, current string
 	var err error
 
@@ -61,7 +66,7 @@ func BranchBehind() (bool, error) {
 
 // FindFiles returns a list of paths to files that have been changed
 // in this branch.
-func FindFiles() ([]string, error) {
+func (r *Reviewer) FindFiles() ([]string, error) {
 	return changedFiles()
 }
 
@@ -86,7 +91,7 @@ func mergeStats(stats []Stats) Stats {
 
 // FindReviewers returns up to 3 of the top reviewers information as determined
 // by cumulative commit count across all files in `paths`.
-func FindReviewers(paths []string) ([]string, error) {
+func (r *Reviewer) FindReviewers(paths []string) ([]string, error) {
 	var (
 		finalStats Stats
 		results    []string

@@ -42,6 +42,8 @@ func TestBranchBehind(t *testing.T) {
 		rg              runGuard
 	)
 
+	r := Reviewer{}
+
 	// Get current branch
 	rg.maybeRun(func() {
 		out, err := exec.Command("git", "status", "-sb").Output()
@@ -95,7 +97,7 @@ func TestBranchBehind(t *testing.T) {
 
 	// Check branch state
 	rg.maybeRun(func() {
-		behind, err := BranchBehind()
+		behind, err := r.BranchBehind()
 
 		if err != nil {
 			t.Errorf("Got error '%v', expected none\n", err)
