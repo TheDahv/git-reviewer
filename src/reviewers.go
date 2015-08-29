@@ -45,6 +45,7 @@ func (s Stats) Swap(i, j int) {
 // Reviewer manages the operations and sequencing of the branch reviewer
 type Reviewer struct {
 	ShowFiles bool
+	Verbose   bool
 }
 
 // BranchBehind is not yet implemented. Determines if the current branch
@@ -113,7 +114,7 @@ func (r *Reviewer) FindReviewers(paths []string) ([]string, error) {
 		case stat := <-statCh:
 			merged[stat.Reviewer] += stat.Count
 		case signal := <-opCh:
-			if signal.err != nil {
+			if signal.err != nil && r.Verbose {
 				// This path must not exist upstream, so lets skip it
 				fmt.Println("Skipping " + signal.path)
 			}

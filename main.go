@@ -9,10 +9,11 @@ import (
 
 func main() {
 	showFiles := flag.Bool("show-files", false, "Show changed files for reviewing")
+	verbose := flag.Bool("verbose", false, "Show progress and errors information")
 
 	flag.Parse()
 
-	r := gr.Reviewer{*showFiles}
+	r := gr.Reviewer{*showFiles, *verbose}
 
 	// Determine if branch is reviewable
 	if behind, err := r.BranchBehind(); behind || err != nil {
