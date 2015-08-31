@@ -5,6 +5,7 @@ import (
 	rx "regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var countExtractor *rx.Regexp
@@ -64,17 +65,22 @@ func changedFiles() ([]string, error) {
 
 // committerCounts finds recent committers and commit counts for
 // the file at `path`. It uses 2 channels to communicate the state of
-// processing.
+// processing. If `since` is a proper 'YYYY-MM-DD' formatted date, the
+// command will only consider commits for `path` created after the date.
+// Otherwise, it defaults to 6 months before the current day.
 //
 // `stat` emits committer statistics as they are found for each file.
 // `done` emits once with a possible error to signal completion.
-func committerCounts(path string, stat chan Stat, done chan statResp) {
+func committerCounts(path string, since string, stat chan Stat, done chan statResp) {
 	var signal = statResp{path: path}
 
-	// TODO Parse "since" date from options or calculate from current
-	// date if not specified
-	since, err := exec.Command(
-		"bash", "-c", "git log --since 2015-01-01 --reverse |"+
+	if len(since) == 0 {
+		// Calculate 6 months ago from today's date and set the 'since' argument
+		since = time.Now().AddDate(0, -6, 0).Format("2006-01-02")
+	}
+
+	c, err := exec.Command(
+		"bash", "-c", "git log --since "+since+" --reverse |"+
 			"head -n 1 | awk '{print $2}'").Output()
 
 	if err != nil {
@@ -85,7 +91,7 @@ func committerCounts(path string, stat chan Stat, done chan statResp) {
 	cmd := strings.Join(
 		[]string{
 			"git shortlog -sne --no-merges",
-			strings.TrimSpace(string(since)) + "..HEAD",
+			strings.TrimSpace(string(c)) + "..HEAD",
 			path,
 		}, " ")
 

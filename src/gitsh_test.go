@@ -133,7 +133,7 @@ func TestCommitterCounts(t *testing.T) {
 	var counts []Stat
 
 	go func(path string) {
-		committerCounts(path, ch, done)
+		committerCounts(path, "", ch, done)
 	}(path)
 
 	for i := 0; i < 1; {
@@ -174,7 +174,7 @@ func TestCommitterCountsOnBadPath(t *testing.T) {
 	var counts []Stat
 
 	go func() {
-		committerCounts(path, ch, done)
+		committerCounts(path, "", ch, done)
 	}()
 
 	for i := 0; i < 1; {

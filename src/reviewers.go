@@ -46,6 +46,7 @@ func (s Stats) Swap(i, j int) {
 type Reviewer struct {
 	ShowFiles bool
 	Verbose   bool
+	Since     string
 }
 
 // BranchBehind is not yet implemented. Determines if the current branch
@@ -85,7 +86,7 @@ func (r *Reviewer) FindReviewers(paths []string) ([]string, error) {
 
 	for _, path := range paths {
 		go func(path string) {
-			committerCounts(path, statCh, opCh)
+			committerCounts(path, r.Since, statCh, opCh)
 		}(path)
 	}
 
