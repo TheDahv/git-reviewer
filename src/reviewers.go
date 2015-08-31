@@ -71,25 +71,6 @@ func (r *Reviewer) FindFiles() ([]string, error) {
 	return changedFiles()
 }
 
-// mergeStats takes a list of stats and groups them by Reviewer, summing
-// total commit count for each. A new Stats with all data merged is returned.
-func mergeStats(stats []Stats) Stats {
-	var final Stats
-	reviewers := make(map[string]int)
-
-	for _, group := range stats {
-		for _, stat := range group {
-			reviewers[stat.Reviewer] += stat.Count
-		}
-	}
-
-	for reviewer, count := range reviewers {
-		final = append(final, Stat{reviewer, count})
-	}
-
-	return final
-}
-
 // FindReviewers returns up to 3 of the top reviewers information as determined
 // by cumulative commit count across all files in `paths`.
 func (r *Reviewer) FindReviewers(paths []string) ([]string, error) {
