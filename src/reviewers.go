@@ -44,9 +44,10 @@ func (s Stats) Swap(i, j int) {
 
 // Reviewer manages the operations and sequencing of the branch reviewer
 type Reviewer struct {
-	ShowFiles bool
-	Verbose   bool
-	Since     string
+	ShowFiles         bool
+	Verbose           bool
+	Since             string
+	IgnoredExtensions []string
 }
 
 // BranchBehind is not yet implemented. Determines if the current branch
@@ -69,7 +70,7 @@ func (r *Reviewer) BranchBehind() (bool, error) {
 // FindFiles returns a list of paths to files that have been changed
 // in this branch.
 func (r *Reviewer) FindFiles() ([]string, error) {
-	return changedFiles()
+	return changedFiles(r.IgnoredExtensions)
 }
 
 // FindReviewers returns up to 3 of the top reviewers information as determined

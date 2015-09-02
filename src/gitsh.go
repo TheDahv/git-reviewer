@@ -45,7 +45,7 @@ func commitTimeStamp(obj string) (string, error) {
 
 // changedFiles returns the paths of all files changed in commits between
 // master and the current branch.
-func changedFiles() ([]string, error) {
+func changedFiles(ignoredExt []string) ([]string, error) {
 	var lines []string
 	out, err := run("git diff master HEAD --name-only")
 
@@ -55,7 +55,15 @@ func changedFiles() ([]string, error) {
 
 	for _, line := range strings.Split(out, "\n") {
 		l := strings.Trim(line, " ")
-		if len(l) > 0 {
+
+		passExtCheck := true
+		if len(ignoredExt) > 0 {
+			for _, ext := range ignoredExt {
+				passExtCheck = passExtCheck && !strings.HasSuffix(line, ext)
+			}
+		}
+
+		if len(l) > 0 && passExtCheck {
 			lines = append(lines, l)
 		}
 	}

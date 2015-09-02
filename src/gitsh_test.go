@@ -87,7 +87,7 @@ func TestChangedFiles(t *testing.T) {
 
 	// Test for changes
 	rg.maybeRun(func() {
-		lines, err := changedFiles()
+		lines, err := changedFiles([]string{})
 		if err != nil {
 			t.Errorf("Got error %v, expected none\n", err)
 		}
