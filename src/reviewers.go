@@ -51,6 +51,7 @@ type Reviewer struct {
 	IgnoredExtensions []string
 	OnlyExtensions    []string
 	IgnoredPaths      []string
+	OnlyPaths         []string
 }
 
 // BranchBehind is not yet implemented. Determines if the current branch
@@ -83,37 +84,62 @@ func (r *Reviewer) FindFiles() ([]string, error) {
 	for _, line := range strings.Split(out, "\n") {
 		l := strings.Trim(line, " ")
 
-		var passExtCheck bool
-
-		// OnlyExtensions should take priority over IgnoredExtensions if both
-		// happen to be defined
-		if len(r.OnlyExtensions) > 0 {
-			passExtCheck = false
-			for _, ext := range r.OnlyExtensions {
-				passExtCheck = passExtCheck || strings.HasSuffix(line, ext)
-			}
-		} else if len(r.IgnoredExtensions) > 0 {
-			passExtCheck = true
-			for _, ext := range r.IgnoredExtensions {
-				passExtCheck = passExtCheck && !strings.HasSuffix(line, ext)
-			}
-		}
-
-		passPathCheck := true
-		lLen := len(line)
-		if len(r.IgnoredPaths) > 0 {
-			for _, prefix := range r.IgnoredPaths {
-				passPathCheck = passPathCheck &&
-					len(strings.TrimPrefix(line, prefix)) == lLen
-			}
-		}
-
-		if len(l) > 0 && passExtCheck && passPathCheck {
+		if len(l) > 0 && considerExt(line, r) && considerPath(line, r) {
 			lines = append(lines, l)
 		}
 	}
 
 	return lines, err
+}
+
+func considerExt(path string, opts *Reviewer) bool {
+	lAllow, lIgnore := len(opts.OnlyExtensions), len(opts.IgnoredExtensions)
+
+	if lAllow == 0 && lIgnore == 0 {
+		return true
+	}
+
+	if lAllow > 0 {
+		for _, ext := range opts.OnlyExtensions {
+			if strings.HasSuffix(path, ext) {
+				return true
+			}
+		}
+	} else if lIgnore > 0 {
+		passes := true
+		for _, ext := range opts.IgnoredExtensions {
+			passes = passes && !strings.HasSuffix(path, ext)
+		}
+
+		return passes
+	}
+
+	return false
+}
+
+func considerPath(path string, opts *Reviewer) bool {
+	lAllow, lIgnore := len(opts.OnlyPaths), len(opts.IgnoredPaths)
+	pLen := len(path)
+
+	if lAllow == 0 && lIgnore == 0 {
+		return true
+	}
+
+	if lAllow > 0 {
+		for _, prefix := range opts.OnlyPaths {
+			if len(strings.TrimPrefix(path, prefix)) < pLen {
+				return true
+			}
+		}
+	} else if lIgnore > 0 {
+		passes := true
+		for _, prefix := range opts.IgnoredPaths {
+			passes = passes && len(strings.TrimPrefix(path, prefix)) == pLen
+		}
+
+		return passes
+	}
+	return false
 }
 
 // FindReviewers returns up to 3 of the top reviewers information as determined

@@ -29,6 +29,8 @@ func main() {
 		" one of these extensions (--only-extension go,js)")
 	ip := flag.String("ignore-path", "", "Exclude file or files under path"+
 		" (--ignore-path main.go,src/")
+	op := flag.String("only-path", "", "Only consider file or files under path"+
+		" (--only-path main.go,src/")
 
 	flag.Parse()
 
@@ -43,6 +45,7 @@ func main() {
 	ignoredExtensions := strings.FieldsFunc(*ie, spaceOrComma)
 	onlyExtensions := strings.FieldsFunc(*oe, spaceOrComma)
 	ignoredPaths := strings.FieldsFunc(*ip, spaceOrComma)
+	onlyPaths := strings.FieldsFunc(*op, spaceOrComma)
 
 	err := checkDateArg(*since)
 	if len(*since) > 0 && err != nil {
@@ -57,6 +60,7 @@ func main() {
 		ignoredExtensions,
 		onlyExtensions,
 		ignoredPaths,
+		onlyPaths,
 	}
 
 	// Determine if branch is reviewable
