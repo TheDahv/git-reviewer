@@ -45,7 +45,9 @@ func commitTimeStamp(obj string) (string, error) {
 
 // changedFiles returns the paths of all files changed in commits between
 // master and the current branch.
-func changedFiles(ignoredExt []string) ([]string, error) {
+// iExt is a list of file extensions to use to filter final results.
+// iPaths is a list of path prefixes to use to filter final results.
+func changedFiles(iExt []string, iPaths []string) ([]string, error) {
 	var lines []string
 	out, err := run("git diff master HEAD --name-only")
 
@@ -57,13 +59,22 @@ func changedFiles(ignoredExt []string) ([]string, error) {
 		l := strings.Trim(line, " ")
 
 		passExtCheck := true
-		if len(ignoredExt) > 0 {
-			for _, ext := range ignoredExt {
+		if len(iExt) > 0 {
+			for _, ext := range iExt {
 				passExtCheck = passExtCheck && !strings.HasSuffix(line, ext)
 			}
 		}
 
-		if len(l) > 0 && passExtCheck {
+		passPathCheck := true
+		lLen := len(line)
+		if len(iPaths) > 0 {
+			for _, prefix := range iPaths {
+				passPathCheck = passPathCheck &&
+					len(strings.TrimPrefix(line, prefix)) == lLen
+			}
+		}
+
+		if len(l) > 0 && passExtCheck && passPathCheck {
 			lines = append(lines, l)
 		}
 	}

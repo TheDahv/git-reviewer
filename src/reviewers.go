@@ -48,6 +48,7 @@ type Reviewer struct {
 	Verbose           bool
 	Since             string
 	IgnoredExtensions []string
+	IgnoredPaths      []string
 }
 
 // BranchBehind is not yet implemented. Determines if the current branch
@@ -70,7 +71,7 @@ func (r *Reviewer) BranchBehind() (bool, error) {
 // FindFiles returns a list of paths to files that have been changed
 // in this branch.
 func (r *Reviewer) FindFiles() ([]string, error) {
-	return changedFiles(r.IgnoredExtensions)
+	return changedFiles(r.IgnoredExtensions, r.IgnoredPaths)
 }
 
 // FindReviewers returns up to 3 of the top reviewers information as determined
