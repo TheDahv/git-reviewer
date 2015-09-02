@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"regexp"
+	"strings"
 
 	gr "github.com/thedahv/git-reviewer/src"
 )
@@ -22,8 +23,29 @@ func main() {
 	force := flag.Bool("force", false, "Continue processing despite checks or errors")
 	since := flag.String("since", "", "Consider commits after date when finding"+
 		" reviewers. Defaults to 6 months ago (format 'YYYY-MM-DD')")
+	ie := flag.String("ignore-extension", "", "Exclude changed paths that end with"+
+		" these extensions (--ignore-extension svg,png,jpg)")
+	oe := flag.String("only-extension", "", "Only consider changed paths that end with"+
+		" one of these extensions (--only-extension go,js)")
+	ip := flag.String("ignore-path", "", "Exclude file or files under path"+
+		" (--ignore-path main.go,src)")
+	op := flag.String("only-path", "", "Only consider file or files under path"+
+		" (--only-path main.go,src)")
 
 	flag.Parse()
+
+	spaceOrComma := func(r rune) bool {
+		switch r {
+		case ' ', ',':
+			return true
+		}
+		return false
+	}
+
+	ignoredExtensions := strings.FieldsFunc(*ie, spaceOrComma)
+	onlyExtensions := strings.FieldsFunc(*oe, spaceOrComma)
+	ignoredPaths := strings.FieldsFunc(*ip, spaceOrComma)
+	onlyPaths := strings.FieldsFunc(*op, spaceOrComma)
 
 	err := checkDateArg(*since)
 	if len(*since) > 0 && err != nil {
@@ -31,7 +53,15 @@ func main() {
 		return
 	}
 
-	r := gr.Reviewer{*showFiles, *verbose, *since}
+	r := gr.Reviewer{
+		*showFiles,
+		*verbose,
+		*since,
+		ignoredExtensions,
+		onlyExtensions,
+		ignoredPaths,
+		onlyPaths,
+	}
 
 	// Determine if branch is reviewable
 	if behind, err := r.BranchBehind(); behind || err != nil {

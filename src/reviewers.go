@@ -3,6 +3,7 @@ package gitreviewers
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Stat contains contributor name and commit count summary. It is
@@ -44,9 +45,13 @@ func (s Stats) Swap(i, j int) {
 
 // Reviewer manages the operations and sequencing of the branch reviewer
 type Reviewer struct {
-	ShowFiles bool
-	Verbose   bool
-	Since     string
+	ShowFiles         bool
+	Verbose           bool
+	Since             string
+	IgnoredExtensions []string
+	OnlyExtensions    []string
+	IgnoredPaths      []string
+	OnlyPaths         []string
 }
 
 // BranchBehind is not yet implemented. Determines if the current branch
@@ -67,9 +72,74 @@ func (r *Reviewer) BranchBehind() (bool, error) {
 }
 
 // FindFiles returns a list of paths to files that have been changed
-// in this branch.
+// in this branch with respect to `master`.
 func (r *Reviewer) FindFiles() ([]string, error) {
-	return changedFiles()
+	var lines []string
+	out, err := run("git diff master HEAD --name-only")
+
+	if err != nil {
+		return lines, err
+	}
+
+	for _, line := range strings.Split(out, "\n") {
+		l := strings.Trim(line, " ")
+
+		if len(l) > 0 && considerExt(line, r) && considerPath(line, r) {
+			lines = append(lines, l)
+		}
+	}
+
+	return lines, err
+}
+
+func considerExt(path string, opts *Reviewer) bool {
+	lAllow, lIgnore := len(opts.OnlyExtensions), len(opts.IgnoredExtensions)
+
+	if lAllow == 0 && lIgnore == 0 {
+		return true
+	}
+
+	if lAllow > 0 {
+		for _, ext := range opts.OnlyExtensions {
+			if strings.HasSuffix(path, ext) {
+				return true
+			}
+		}
+	} else if lIgnore > 0 {
+		passes := true
+		for _, ext := range opts.IgnoredExtensions {
+			passes = passes && !strings.HasSuffix(path, ext)
+		}
+
+		return passes
+	}
+
+	return false
+}
+
+func considerPath(path string, opts *Reviewer) bool {
+	lAllow, lIgnore := len(opts.OnlyPaths), len(opts.IgnoredPaths)
+	pLen := len(path)
+
+	if lAllow == 0 && lIgnore == 0 {
+		return true
+	}
+
+	if lAllow > 0 {
+		for _, prefix := range opts.OnlyPaths {
+			if len(strings.TrimPrefix(path, prefix)) < pLen {
+				return true
+			}
+		}
+	} else if lIgnore > 0 {
+		passes := true
+		for _, prefix := range opts.IgnoredPaths {
+			passes = passes && len(strings.TrimPrefix(path, prefix)) == pLen
+		}
+
+		return passes
+	}
+	return false
 }
 
 // FindReviewers returns up to 3 of the top reviewers information as determined

@@ -43,26 +43,6 @@ func commitTimeStamp(obj string) (string, error) {
 	return strings.Trim(line, "\""), nil
 }
 
-// changedFiles returns the paths of all files changed in commits between
-// master and the current branch.
-func changedFiles() ([]string, error) {
-	var lines []string
-	out, err := run("git diff master HEAD --name-only")
-
-	if err != nil {
-		return lines, err
-	}
-
-	for _, line := range strings.Split(out, "\n") {
-		l := strings.Trim(line, " ")
-		if len(l) > 0 {
-			lines = append(lines, l)
-		}
-	}
-
-	return lines, err
-}
-
 // committerCounts finds recent committers and commit counts for
 // the file at `path`. It uses 2 channels to communicate the state of
 // processing. If `since` is a proper 'YYYY-MM-DD' formatted date, the
