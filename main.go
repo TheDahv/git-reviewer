@@ -24,7 +24,9 @@ func main() {
 	since := flag.String("since", "", "Consider commits after date when finding"+
 		" reviewers. Defaults to 6 months ago (format 'YYYY-MM-DD')")
 	ie := flag.String("ignore-extension", "", "Exclude changed paths that end with"+
-		" these comma/space-delimited extensions (--ignore-extension svg,png,jpg)")
+		" these extensions (--ignore-extension svg,png,jpg)")
+	oe := flag.String("only-extension", "", "Only consider changed paths that end with"+
+		" one of these extensions (--only-extension go,js)")
 	ip := flag.String("ignore-path", "", "Exclude file or files under path"+
 		" (--ignore-path main.go,src/")
 
@@ -39,6 +41,7 @@ func main() {
 	}
 
 	ignoredExtensions := strings.FieldsFunc(*ie, spaceOrComma)
+	onlyExtensions := strings.FieldsFunc(*oe, spaceOrComma)
 	ignoredPaths := strings.FieldsFunc(*ip, spaceOrComma)
 
 	err := checkDateArg(*since)
@@ -52,6 +55,7 @@ func main() {
 		*verbose,
 		*since,
 		ignoredExtensions,
+		onlyExtensions,
 		ignoredPaths,
 	}
 

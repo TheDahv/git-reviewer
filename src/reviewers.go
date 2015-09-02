@@ -49,6 +49,7 @@ type Reviewer struct {
 	Verbose           bool
 	Since             string
 	IgnoredExtensions []string
+	OnlyExtensions    []string
 	IgnoredPaths      []string
 }
 
@@ -82,8 +83,17 @@ func (r *Reviewer) FindFiles() ([]string, error) {
 	for _, line := range strings.Split(out, "\n") {
 		l := strings.Trim(line, " ")
 
-		passExtCheck := true
-		if len(r.IgnoredExtensions) > 0 {
+		var passExtCheck bool
+
+		// OnlyExtensions should take priority over IgnoredExtensions if both
+		// happen to be defined
+		if len(r.OnlyExtensions) > 0 {
+			passExtCheck = false
+			for _, ext := range r.OnlyExtensions {
+				passExtCheck = passExtCheck || strings.HasSuffix(line, ext)
+			}
+		} else if len(r.IgnoredExtensions) > 0 {
+			passExtCheck = true
 			for _, ext := range r.IgnoredExtensions {
 				passExtCheck = passExtCheck && !strings.HasSuffix(line, ext)
 			}
