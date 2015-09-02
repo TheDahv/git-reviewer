@@ -28,9 +28,9 @@ func main() {
 	oe := flag.String("only-extension", "", "Only consider changed paths that end with"+
 		" one of these extensions (--only-extension go,js)")
 	ip := flag.String("ignore-path", "", "Exclude file or files under path"+
-		" (--ignore-path main.go,src/")
+		" (--ignore-path main.go,src)")
 	op := flag.String("only-path", "", "Only consider file or files under path"+
-		" (--only-path main.go,src/")
+		" (--only-path main.go,src)")
 
 	flag.Parse()
 
