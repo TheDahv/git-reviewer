@@ -3,6 +3,7 @@ package gitreviewers
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Stat contains contributor name and commit count summary. It is
@@ -69,9 +70,40 @@ func (r *Reviewer) BranchBehind() (bool, error) {
 }
 
 // FindFiles returns a list of paths to files that have been changed
-// in this branch.
+// in this branch with respect to `master`.
 func (r *Reviewer) FindFiles() ([]string, error) {
-	return changedFiles(r.IgnoredExtensions, r.IgnoredPaths)
+	var lines []string
+	out, err := run("git diff master HEAD --name-only")
+
+	if err != nil {
+		return lines, err
+	}
+
+	for _, line := range strings.Split(out, "\n") {
+		l := strings.Trim(line, " ")
+
+		passExtCheck := true
+		if len(r.IgnoredExtensions) > 0 {
+			for _, ext := range r.IgnoredExtensions {
+				passExtCheck = passExtCheck && !strings.HasSuffix(line, ext)
+			}
+		}
+
+		passPathCheck := true
+		lLen := len(line)
+		if len(r.IgnoredPaths) > 0 {
+			for _, prefix := range r.IgnoredPaths {
+				passPathCheck = passPathCheck &&
+					len(strings.TrimPrefix(line, prefix)) == lLen
+			}
+		}
+
+		if len(l) > 0 && passExtCheck && passPathCheck {
+			lines = append(lines, l)
+		}
+	}
+
+	return lines, err
 }
 
 // FindReviewers returns up to 3 of the top reviewers information as determined
