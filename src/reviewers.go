@@ -54,6 +54,16 @@ type Reviewer struct {
 	OnlyPaths         []string
 }
 
+// defaultIgnoreExt represent filetypes that are more often
+// machine-edited and are less likely to reflect actual experience
+// on a project
+var defaultIgnoreExt = []string{
+	"svg",
+	"json",
+	"nock",
+	"xml",
+}
+
 // BranchBehind is not yet implemented. Determines if the current branch
 // behind master and requires that it be "merged up".
 func (r *Reviewer) BranchBehind() (bool, error) {
@@ -93,7 +103,11 @@ func (r *Reviewer) FindFiles() ([]string, error) {
 }
 
 func considerExt(path string, opts *Reviewer) bool {
-	lAllow, lIgnore := len(opts.OnlyExtensions), len(opts.IgnoredExtensions)
+	ignExt := []string{}
+	ignExt = append(ignExt, defaultIgnoreExt...)
+	ignExt = append(ignExt, opts.IgnoredExtensions...)
+
+	lAllow, lIgnore := len(opts.OnlyExtensions), len(ignExt)
 
 	if lAllow == 0 && lIgnore == 0 {
 		return true
@@ -107,7 +121,7 @@ func considerExt(path string, opts *Reviewer) bool {
 		}
 	} else if lIgnore > 0 {
 		passes := true
-		for _, ext := range opts.IgnoredExtensions {
+		for _, ext := range ignExt {
 			passes = passes && !strings.HasSuffix(path, ext)
 		}
 

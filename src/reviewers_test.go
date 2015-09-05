@@ -233,5 +233,33 @@ func TestFindFiles(t *testing.T) {
 	if rg.err != nil {
 		t.Errorf("Test setup/teardown failed on step %s with error: %v\n", rg.msg, rg.err)
 	}
+}
 
+func TestDefaultIgnoreExtensions(t *testing.T) {
+	// All defaults
+	if considerExt("myfile.svg", &Reviewer{}) {
+		t.Error("Expected SVG files to be ignored by default")
+	}
+
+	if considerExt("myfile.json", &Reviewer{}) {
+		t.Error("Expected JSON files to be ignored by default")
+	}
+
+	if considerExt("myfile.nock", &Reviewer{}) {
+		t.Error("Expected NOCK files to be ignored by default")
+	}
+
+	if considerExt("myfile.xml", &Reviewer{}) {
+		t.Error("Expected XML files to be ignored by default")
+	}
+
+	// Defaults in addition to extra extensions
+	opts := &Reviewer{IgnoredExtensions: []string{"coffee"}}
+	if considerExt("myfile.coffee", opts) {
+		t.Error("Expected coffee files to be explicitly ignored")
+	}
+
+	if considerExt("myfile.json", opts) {
+		t.Error("Expected JSON files to be ignored when other ignores defined")
+	}
 }
