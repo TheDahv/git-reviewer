@@ -200,7 +200,12 @@ func TestFindFiles(t *testing.T) {
 	rg.maybeRun(func() {
 		r := Reviewer{}
 
-		lines, err := r.FindFiles()
+		dir, err := os.Getwd()
+		if err != nil {
+			t.Errorf("Error on setup '%v'\n", err)
+			t.FailNow()
+		}
+		lines, err := r.FindFiles(dir + "/..")
 		if err != nil {
 			t.Errorf("Got error %v, expected none\n", err)
 		}

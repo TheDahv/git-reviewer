@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
@@ -78,7 +79,12 @@ func main() {
 	}
 
 	// Find changed files in this branch.
-	files, err := r.FindFiles()
+	dir, err := os.Getwd()
+	if err != nil {
+		fmt.Printf("Unable to open current directory: %v\n", err)
+		return
+	}
+	files, err := r.FindFiles(dir)
 
 	if err != nil {
 		fmt.Printf("There was an error finding files: %v\n", err)

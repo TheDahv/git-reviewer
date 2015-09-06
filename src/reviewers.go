@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	gg "github.com/libgit2/git2go"
 )
 
 // Stat contains contributor name and commit count summary. It is
@@ -104,25 +106,137 @@ func (r *Reviewer) BranchBehind() (bool, error) {
 	return current < master, nil
 }
 
+// freeable makes it easier for us to deal with objects of all types
+// that require being freed at the end of a function.
+type freeable interface {
+	Free()
+}
+
 // FindFiles returns a list of paths to files that have been changed
 // in this branch with respect to `master`.
-func (r *Reviewer) FindFiles() ([]string, error) {
-	var lines []string
-	out, err := run("git diff master HEAD --name-only")
+func (r *Reviewer) FindFiles(repoPath string) ([]string, error) {
+	var (
+		rg      runGuard
+		lines   []string
+		repo    *gg.Repository
+		mBranch *gg.Branch
+		hRef    *gg.Reference
+		hCom    *gg.Commit
+		mCom    *gg.Commit
+		mTree   *gg.Tree
+		hTree   *gg.Tree
+		opts    gg.DiffOptions
+		diff    *gg.Diff
+	)
 
-	if err != nil {
-		return lines, err
-	}
-
-	for _, line := range strings.Split(out, "\n") {
-		l := strings.Trim(line, " ")
-
-		if len(l) > 0 && considerExt(line, r) && considerPath(line, r) {
-			lines = append(lines, l)
+	defer func() {
+		objs := [...]freeable{
+			repo,
+			mBranch,
+			hRef,
+			hCom,
+			mCom,
+			mTree,
+			hTree,
 		}
+
+		for _, obj := range objs {
+			if obj != nil {
+				obj.Free()
+			}
+		}
+
+		if err := diff.Free(); err != nil && r.Verbose {
+			fmt.Printf("Issue cleaning up diff: '%s'\n", err)
+		}
+	}()
+
+	rg.maybeRun(func() {
+		var err error
+		if repo, err = gg.OpenRepository(repoPath); err != nil {
+			rg.err = err
+			rg.msg = "issue opening repository"
+		}
+	})
+
+	rg.maybeRun(func() {
+		var err error
+		if mBranch, err = repo.LookupBranch("master", gg.BranchLocal); err != nil {
+			rg.err = err
+			rg.msg = "issue opening master branch"
+		}
+	})
+
+	rg.maybeRun(func() {
+		var err error
+		if mCom, err = repo.LookupCommit(mBranch.Reference.Target()); err != nil {
+			rg.err = err
+			rg.msg = "issue opening commit at master"
+		}
+	})
+
+	rg.maybeRun(func() {
+		var err error
+		if hRef, err = repo.Head(); err != nil {
+			rg.err = err
+			rg.msg = "issue opening repo at HEAD"
+		}
+	})
+
+	rg.maybeRun(func() {
+		var err error
+		if hCom, err = repo.LookupCommit(hRef.Target()); err != nil {
+			rg.err = err
+			rg.msg = "issue opening commit at HEAD"
+		}
+	})
+
+	rg.maybeRun(func() {
+		var err error
+		if mTree, err = mCom.Tree(); err != nil {
+			rg.err = err
+			rg.msg = "issue opening tree at master"
+		}
+	})
+
+	rg.maybeRun(func() {
+		var err error
+		if hTree, err = hCom.Tree(); err != nil {
+			rg.err = err
+			rg.msg = "issue opening tree at HEAD"
+		}
+	})
+
+	rg.maybeRun(func() {
+		var err error
+		if opts, err = gg.DefaultDiffOptions(); err != nil {
+			rg.err = err
+			rg.msg = "issue creating diff options"
+		}
+	})
+
+	rg.maybeRun(func() {
+		var err error
+		if diff, err = repo.DiffTreeToTree(mTree, hTree, &opts); err != nil {
+			rg.err = err
+			rg.msg = "issue finding diff"
+		}
+	})
+
+	rg.maybeRun(func() {
+		diff.ForEach(func(file gg.DiffDelta, progress float64) (
+			gg.DiffForEachHunkCallback, error) {
+
+			lines = append(lines, file.OldFile.Path)
+			return nil, nil
+		}, gg.DiffDetailFiles)
+	})
+
+	if rg.err != nil && rg.msg != "" && r.Verbose {
+		fmt.Printf("Error finding diff files: '%s'\n", rg.msg)
 	}
 
-	return lines, err
+	return lines, rg.err
 }
 
 func considerExt(path string, opts *Reviewer) bool {
