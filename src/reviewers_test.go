@@ -33,7 +33,10 @@ func TestBranchBehind(t *testing.T) {
 		rg              runGuard
 	)
 
-	r := Reviewer{}
+	repo := prepareRepo(t)
+	defer repo.Free()
+
+	r := Reviewer{Repo: repo}
 
 	// Get current branch
 	rg.maybeRun(func() {

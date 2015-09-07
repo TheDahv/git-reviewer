@@ -33,18 +33,6 @@ func run(cmd string) (string, error) {
 	return string(out), nil
 }
 
-// commitTimeStamp returns the timestamp of the current commit for
-// the object (branch, commit, etc.).
-func commitTimeStamp(obj string) (string, error) {
-	out, err := run("git show --format=\"%ct\" " + obj)
-	if err != nil {
-		return "", nil
-	}
-
-	line := strings.Split(out, "\n")[0]
-	return strings.Trim(line, "\""), nil
-}
-
 // committerCounts finds recent committers and commit counts for
 // the file at `path`. It uses 2 channels to communicate the state of
 // processing. If `since` is a proper 'YYYY-MM-DD' formatted date, the

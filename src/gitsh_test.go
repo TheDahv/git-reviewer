@@ -2,8 +2,8 @@ package gitreviewers
 
 import (
 	"strconv"
+	"os"
 	"testing"
-	"time"
 )
 
 /*
@@ -79,21 +79,4 @@ func TestCommitterCountsOnBadPath(t *testing.T) {
 	if len(counts) != 0 {
 		t.Errorf("Expected no stats back, got %d\n", len(counts))
 	}
-}
-*/
-
-func TestCommitTimestamp(t *testing.T) {
-	ts, err := commitTimeStamp("master")
-
-	if err != nil {
-		t.Errorf("Got error %v, expected none\n", err)
-		t.FailNow()
-	}
-
-	tsi, err := strconv.ParseInt(ts, 10, 64)
-	if err != nil {
-		t.Errorf("Unable to turn timestamp into integer: %v\n", err)
-	}
-	// As long as we parse into some kind of date without issue, we're ok
-	time.Unix(tsi, 0)
 }

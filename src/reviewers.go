@@ -81,6 +81,12 @@ type Reviewer struct {
 	OnlyPaths         []string
 }
 
+// freeable makes it easier for us to deal with objects of all types
+// that require being freed at the end of a function.
+type freeable interface {
+	Free()
+}
+
 // defaultIgnoreExt represent filetypes that are more often
 // machine-edited and are less likely to reflect actual experience
 // on a project
@@ -94,24 +100,64 @@ var defaultIgnoreExt = []string{
 // BranchBehind is not yet implemented. Determines if the current branch
 // behind master and requires that it be "merged up".
 func (r *Reviewer) BranchBehind() (bool, error) {
-	var master, current string
-	var err error
-
-	if master, err = commitTimeStamp("master"); err != nil {
-		return false, err
+	if r.Repo == nil {
+		return false, errors.New("repo not initialized")
 	}
 
-	if current, err = commitTimeStamp("HEAD"); err != nil {
-		return false, err
-	}
+	var (
+		rg      runGuard
+		mBranch *gg.Branch
+		mCom    *gg.Commit
+		hRef    *gg.Reference
+		hCom    *gg.Commit
+		behind  bool
+	)
 
-	return current < master, nil
-}
+	defer func() {
+		objs := [...]freeable{
+			mBranch,
+			mCom,
+			hRef,
+			hCom,
+		}
+		for _, obj := range objs {
+			obj.Free()
+		}
+	}()
 
-// freeable makes it easier for us to deal with objects of all types
-// that require being freed at the end of a function.
-type freeable interface {
-	Free()
+	rg.maybeRun(func() {
+		var err error
+		if mBranch, err = r.Repo.LookupBranch("master", gg.BranchLocal); err != nil {
+			rg.err = err
+			rg.msg = "Issue opening master branch"
+		}
+	})
+	rg.maybeRun(func() {
+		var err error
+		if mCom, err = r.Repo.LookupCommit(mBranch.Reference.Target()); err != nil {
+			rg.err = err
+			rg.msg = "Issue opening master commit"
+		}
+	})
+	rg.maybeRun(func() {
+		var err error
+		if hRef, err = r.Repo.Head(); err != nil {
+			rg.err = err
+			rg.msg = "Issue opening HEAD reference"
+		}
+	})
+	rg.maybeRun(func() {
+		var err error
+		if hCom, err = r.Repo.LookupCommit(hRef.Target()); err != nil {
+			rg.err = err
+			rg.msg = "Issue opening HEAD commit"
+		}
+	})
+	rg.maybeRun(func() {
+		behind = hCom.Committer().When.Before(mCom.Committer().When)
+	})
+
+	return behind, rg.err
 }
 
 // FindFiles returns a list of paths to files that have been changed
