@@ -6,7 +6,25 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	gg "github.com/libgit2/git2go"
 )
+
+func prepareRepo(t *testing.T) *gg.Repository {
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Errorf("Unable to open repo directory: '%v'\n", err)
+		t.FailNow()
+	}
+
+	repo, err := gg.OpenRepository(dir + "/..")
+	if err != nil {
+		t.Errorf("Unable to open repository: '%v'\n", err)
+		t.FailNow()
+	}
+
+	return repo
+}
 
 func TestBranchBehind(t *testing.T) {
 	var (
@@ -198,14 +216,12 @@ func TestFindFiles(t *testing.T) {
 
 	// Test for changes
 	rg.maybeRun(func() {
-		r := Reviewer{}
+		repo := prepareRepo(t)
+		defer repo.Free()
 
-		dir, err := os.Getwd()
-		if err != nil {
-			t.Errorf("Error on setup '%v'\n", err)
-			t.FailNow()
-		}
-		lines, err := r.FindFiles(dir + "/..")
+		r := Reviewer{Repo: repo}
+
+		lines, err := r.FindFiles()
 		if err != nil {
 			t.Errorf("Got error %v, expected none\n", err)
 		}

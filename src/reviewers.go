@@ -3,6 +3,7 @@ package gitreviewers
 import (
 	"bytes"
 	"container/heap"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -70,6 +71,7 @@ func (s *Stats) Push(val interface{}) {
 
 // Reviewer manages the operations and sequencing of the branch reviewer
 type Reviewer struct {
+	Repo              *gg.Repository
 	ShowFiles         bool
 	Verbose           bool
 	Since             string
@@ -114,11 +116,10 @@ type freeable interface {
 
 // FindFiles returns a list of paths to files that have been changed
 // in this branch with respect to `master`.
-func (r *Reviewer) FindFiles(repoPath string) ([]string, error) {
+func (r *Reviewer) FindFiles() ([]string, error) {
 	var (
 		rg      runGuard
 		lines   []string
-		repo    *gg.Repository
 		mBranch *gg.Branch
 		hRef    *gg.Reference
 		hCom    *gg.Commit
@@ -129,9 +130,12 @@ func (r *Reviewer) FindFiles(repoPath string) ([]string, error) {
 		diff    *gg.Diff
 	)
 
+	if r.Repo == nil {
+		return lines, errors.New("repo not initialized")
+	}
+
 	defer func() {
 		objs := [...]freeable{
-			repo,
 			mBranch,
 			hRef,
 			hCom,
@@ -153,15 +157,7 @@ func (r *Reviewer) FindFiles(repoPath string) ([]string, error) {
 
 	rg.maybeRun(func() {
 		var err error
-		if repo, err = gg.OpenRepository(repoPath); err != nil {
-			rg.err = err
-			rg.msg = "issue opening repository"
-		}
-	})
-
-	rg.maybeRun(func() {
-		var err error
-		if mBranch, err = repo.LookupBranch("master", gg.BranchLocal); err != nil {
+		if mBranch, err = r.Repo.LookupBranch("master", gg.BranchLocal); err != nil {
 			rg.err = err
 			rg.msg = "issue opening master branch"
 		}
@@ -169,7 +165,7 @@ func (r *Reviewer) FindFiles(repoPath string) ([]string, error) {
 
 	rg.maybeRun(func() {
 		var err error
-		if mCom, err = repo.LookupCommit(mBranch.Reference.Target()); err != nil {
+		if mCom, err = r.Repo.LookupCommit(mBranch.Reference.Target()); err != nil {
 			rg.err = err
 			rg.msg = "issue opening commit at master"
 		}
@@ -177,7 +173,7 @@ func (r *Reviewer) FindFiles(repoPath string) ([]string, error) {
 
 	rg.maybeRun(func() {
 		var err error
-		if hRef, err = repo.Head(); err != nil {
+		if hRef, err = r.Repo.Head(); err != nil {
 			rg.err = err
 			rg.msg = "issue opening repo at HEAD"
 		}
@@ -185,7 +181,7 @@ func (r *Reviewer) FindFiles(repoPath string) ([]string, error) {
 
 	rg.maybeRun(func() {
 		var err error
-		if hCom, err = repo.LookupCommit(hRef.Target()); err != nil {
+		if hCom, err = r.Repo.LookupCommit(hRef.Target()); err != nil {
 			rg.err = err
 			rg.msg = "issue opening commit at HEAD"
 		}
@@ -217,7 +213,7 @@ func (r *Reviewer) FindFiles(repoPath string) ([]string, error) {
 
 	rg.maybeRun(func() {
 		var err error
-		if diff, err = repo.DiffTreeToTree(mTree, hTree, &opts); err != nil {
+		if diff, err = r.Repo.DiffTreeToTree(mTree, hTree, &opts); err != nil {
 			rg.err = err
 			rg.msg = "issue finding diff"
 		}

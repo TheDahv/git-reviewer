@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	gg "github.com/libgit2/git2go"
 	gr "github.com/thedahv/git-reviewer/src"
 )
 
@@ -55,7 +56,20 @@ func main() {
 		return
 	}
 
+	dir, err := os.Getwd()
+	if err != nil {
+		fmt.Printf("Unable to open current directory: %v\n", err)
+		return
+	}
+
+	repo, err := gg.OpenRepository(dir)
+	if err != nil {
+		fmt.Printf("Unable to open repository: %v\n", err)
+		return
+	}
+
 	r := gr.Reviewer{
+		repo,
 		*showFiles,
 		*verbose,
 		*since,
@@ -79,12 +93,7 @@ func main() {
 	}
 
 	// Find changed files in this branch.
-	dir, err := os.Getwd()
-	if err != nil {
-		fmt.Printf("Unable to open current directory: %v\n", err)
-		return
-	}
-	files, err := r.FindFiles(dir)
+	files, err := r.FindFiles()
 
 	if err != nil {
 		fmt.Printf("There was an error finding files: %v\n", err)
