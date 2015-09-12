@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Stat contains contributor name and commit count summary. It is
@@ -41,6 +42,17 @@ func (s Stats) Less(i, j int) bool {
 // Swap implements in-place sorting.
 func (s Stats) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
+}
+
+func (s Stats) AddToSet(val Stat) Stats {
+	for i, stat := range s {
+		if stat.Reviewer == val.Reviewer {
+			s[i].Count += val.Count
+			return s
+		}
+	}
+
+	return append(s, val)
 }
 
 // Reviewer manages the operations and sequencing of the branch reviewer
@@ -164,37 +176,22 @@ func (r *Reviewer) FindReviewers(paths []string) ([]string, error) {
 		results    []string
 	)
 
-	merged := make(map[string]int)
-	statCh := make(chan Stat)
-	opCh := make(chan statResp)
+	finalStats = make(Stats, 0)
 
+	var cs []chan Stats
 	for _, path := range paths {
-		go func(path string) {
-			committerCounts(path, r.Since, statCh, opCh)
-		}(path)
+		cs = append(cs, committerCounts(path, r.Since))
 	}
+
+	data := mergeChans(cs...)
 
 	// Loop and merge stats into single map until all ops are done
-	for i := 0; i < len(paths); {
-		select {
-		case stat := <-statCh:
-			merged[stat.Reviewer] += stat.Count
-		case signal := <-opCh:
-			if signal.err != nil && r.Verbose {
-				// This path must not exist upstream, so lets skip it
-				fmt.Println("Skipping " + signal.path)
+	for stats := range data {
+		for _, stat := range stats {
+			if len(stat.Reviewer) > 0 {
+				finalStats = finalStats.AddToSet(stat)
 			}
-
-			i++
 		}
-	}
-
-	close(statCh)
-	close(opCh)
-
-	// Convert merged into Stats[]
-	for reviewer, count := range merged {
-		finalStats = append(finalStats, Stat{reviewer, count})
 	}
 
 	sort.Sort(sort.Reverse(finalStats))
@@ -209,4 +206,29 @@ func (r *Reviewer) FindReviewers(paths []string) ([]string, error) {
 	}
 
 	return results, nil
+}
+
+func mergeChans(cs ...chan Stats) chan Stats {
+	out := make(chan Stats)
+	var wg sync.WaitGroup
+
+	go func() {
+		wg.Add(len(cs))
+		defer close(out)
+
+		for _, ch := range cs {
+			go func(ch chan Stats) {
+				defer wg.Done()
+				for stats := range ch {
+					if len(stats) > 0 {
+						out <- stats
+					}
+				}
+			}(ch)
+		}
+
+		wg.Wait()
+	}()
+
+	return out
 }

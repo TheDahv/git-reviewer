@@ -1,6 +1,7 @@
 package gitreviewers
 
 import (
+	"fmt"
 	"os/exec"
 	rx "regexp"
 	"strconv"
@@ -51,53 +52,58 @@ func commitTimeStamp(obj string) (string, error) {
 //
 // `stat` emits committer statistics as they are found for each file.
 // `done` emits once with a possible error to signal completion.
-func committerCounts(path string, since string, stat chan Stat, done chan statResp) {
-	var signal = statResp{path: path}
+func committerCounts(path string, since string) chan Stats {
+	ch := make(chan Stats)
 
 	if len(since) == 0 {
 		// Calculate 6 months ago from today's date and set the 'since' argument
 		since = time.Now().AddDate(0, -6, 0).Format("2006-01-02")
 	}
 
-	c, err := exec.Command(
-		"bash", "-c", "git log --since "+since+" --reverse |"+
-			"head -n 1 | awk '{print $2}'").Output()
+	go func() {
+		defer close(ch)
+		c, err := exec.Command(
+			"bash", "-c", "git log --since "+since+" --reverse |"+
+				"head -n 1 | awk '{print $2}'").Output()
 
-	if err != nil {
-		signal.err = err
-		done <- signal
-	}
-
-	cmd := strings.Join(
-		[]string{
-			"git shortlog -sne --no-merges",
-			strings.TrimSpace(string(c)) + "..HEAD",
-			path,
-		}, " ")
-
-	out, err := run(cmd)
-	if err != nil {
-		signal.err = err
-		done <- signal
-	}
-
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.Trim(line, " ")
-		matches := countExtractor.FindStringSubmatch(line)
-		if len(matches) < 3 {
-			continue
-		}
-
-		ct := matches[1]
-		rvwr := matches[2]
-
-		cti, err := strconv.Atoi(ct)
 		if err != nil {
-			continue
+			fmt.Printf("Got error: '%v'. Bailing\n", err)
+			return
 		}
 
-		stat <- Stat{rvwr, cti}
-	}
+		cmd := strings.Join(
+			[]string{
+				"git shortlog -sne --no-merges",
+				strings.TrimSpace(string(c)) + "..HEAD",
+				path,
+			}, " ")
 
-	done <- signal
+		out, err := run(cmd)
+		if err != nil {
+			return
+		}
+
+		var stats Stats
+		for _, line := range strings.Split(out, "\n") {
+			line = strings.Trim(line, " ")
+			matches := countExtractor.FindStringSubmatch(line)
+			if len(matches) < 3 {
+				continue
+			}
+
+			ct := matches[1]
+			rvwr := matches[2]
+
+			cti, err := strconv.Atoi(ct)
+			if err != nil {
+				continue
+			}
+
+			stats = append(stats, Stat{rvwr, cti})
+		}
+
+		ch <- stats
+	}()
+
+	return ch
 }

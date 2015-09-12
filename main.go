@@ -32,6 +32,19 @@ func main() {
 	op := flag.String("only-path", "", "Only consider file or files under path"+
 		" (--only-path main.go,src)")
 
+	/*
+		// Profiling setup
+		pf, perr := os.Create("gitreviewer.prof")
+		if perr != nil {
+			fmt.Println(perr)
+			return
+		}
+		defer pf.Close()
+
+		pprof.StartCPUProfile(pf)
+		defer pprof.StopCPUProfile()
+	*/
+
 	flag.Parse()
 
 	spaceOrComma := func(r rune) bool {
@@ -70,8 +83,8 @@ func main() {
 			return
 		}
 
-		fmt.Print("Current branch is behind master. Merge up!")
-		if *force {
+		fmt.Println("Current branch is behind master. Merge up!")
+		if *force == false {
 			return
 		}
 	}
