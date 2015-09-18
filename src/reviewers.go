@@ -1,8 +1,9 @@
 package gitreviewers
 
 import (
+	"bytes"
+	"container/heap"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 )
@@ -26,8 +27,8 @@ func (cs *Stat) String() string {
 	return fmt.Sprintf("  %d\t%s", cs.Count, cs.Reviewer)
 }
 
-// Stats is a convenience type that lets us implement the sortable interface.
-type Stats []Stat
+// Stats is a convenience type that lets us implement the heap interface.
+type Stats []*Stat
 
 // Len returns the number of Stat objects.
 func (s Stats) Len() int {
@@ -36,23 +37,33 @@ func (s Stats) Len() int {
 
 // Less sorts Stats by the commit count in each Stat.
 func (s Stats) Less(i, j int) bool {
-	return s[i].Count < s[j].Count
+	// We want Pop to give us the highest, not lowest, priority so we
+	// use greater than here.
+	return s[i].Count > s[j].Count
 }
 
-// Swap implements in-place sorting.
+// Swap moves elements around to their proper location in the heap
 func (s Stats) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 
-func (s Stats) AddToSet(val Stat) Stats {
-	for i, stat := range s {
-		if stat.Reviewer == val.Reviewer {
-			s[i].Count += val.Count
-			return s
-		}
+// Pop removes the largest Stat from the queue and returns it.
+func (s *Stats) Pop() interface{} {
+	var stat *Stat
+	n := len(*s)
+	if n == 0 {
+		return nil
 	}
 
-	return append(s, val)
+	stat = (*s)[n-1]
+	*s = (*s)[0 : n-1]
+
+	return stat
+}
+
+// Push adds a stat into the priority queue
+func (s *Stats) Push(val interface{}) {
+	*s = append(*s, val.(*Stat))
 }
 
 // Reviewer manages the operations and sequencing of the branch reviewer
@@ -170,64 +181,86 @@ func considerPath(path string, opts *Reviewer) bool {
 
 // FindReviewers returns up to 3 of the top reviewers information as determined
 // by cumulative commit count across all files in `paths`.
-func (r *Reviewer) FindReviewers(paths []string) ([]string, error) {
-	var (
-		finalStats Stats
-		results    []string
-	)
-
-	finalStats = make(Stats, 0)
-
-	var cs []chan Stats
-	for _, path := range paths {
-		cs = append(cs, committerCounts(path, r.Since))
+func (r *Reviewer) FindReviewers(paths []string) (string, error) {
+	cs := make([]chan *Stat, len(paths))
+	for i, path := range paths {
+		cs[i] = committerCounts(path, r.Since)
 	}
 
 	data := mergeChans(cs...)
 
-	// Loop and merge stats into single map until all ops are done
-	for stats := range data {
-		for _, stat := range stats {
-			if len(stat.Reviewer) > 0 {
-				finalStats = finalStats.AddToSet(stat)
+	set := make(map[string]*Stat)
+	for stat := range data {
+		if len(stat.Reviewer) > 0 {
+			if s, ok := set[stat.Reviewer]; ok {
+				s.Count += stat.Count
+			} else {
+				set[stat.Reviewer] = stat
 			}
 		}
 	}
 
-	sort.Sort(sort.Reverse(finalStats))
+	// Boil to set
+	final := make(Stats, len(set))
+	i := 0
+	for _, val := range set {
+		final[i] = val
+		i++
+	}
 
 	// Grab top 3 reviewers and return string lines
+	var buffer bytes.Buffer
 	maxStats := 3
-	if l := len(finalStats); l < maxStats {
+	if l := len(final); l < maxStats {
 		maxStats = l
 	}
-	for _, stat := range finalStats[:maxStats] {
-		results = append(results, stat.String())
+
+	topN := chooseTopN(maxStats, final)
+
+	for i := range topN {
+		buffer.WriteString(topN[i].String())
+		buffer.WriteString("\n")
 	}
 
-	return results, nil
+	return buffer.String(), nil
 }
 
-func mergeChans(cs ...chan Stats) chan Stats {
-	out := make(chan Stats)
+func chooseTopN(n int, s Stats) Stats {
+	top := make(Stats, n)
+	ti := 0
+
+	heap.Init(&s)
+	for i := 0; i < n; i++ {
+		val := heap.Pop(&s)
+		if val != nil {
+			top[ti] = val.(*Stat)
+			ti++
+		}
+	}
+
+	return top
+}
+
+func mergeChans(cs ...chan *Stat) chan *Stat {
+	// https://blog.golang.org/pipelines
 	var wg sync.WaitGroup
+	out := make(chan *Stat)
+
+	output := func(c <-chan *Stat) {
+		for n := range c {
+			out <- n
+		}
+		wg.Done()
+	}
+	wg.Add(len(cs))
+
+	for _, c := range cs {
+		go output(c)
+	}
 
 	go func() {
-		wg.Add(len(cs))
-		defer close(out)
-
-		for _, ch := range cs {
-			go func(ch chan Stats) {
-				defer wg.Done()
-				for stats := range ch {
-					if len(stats) > 0 {
-						out <- stats
-					}
-				}
-			}(ch)
-		}
-
 		wg.Wait()
+		close(out)
 	}()
 
 	return out

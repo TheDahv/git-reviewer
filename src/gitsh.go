@@ -1,6 +1,7 @@
 package gitreviewers
 
 import (
+	"bytes"
 	"fmt"
 	"os/exec"
 	rx "regexp"
@@ -52,8 +53,8 @@ func commitTimeStamp(obj string) (string, error) {
 //
 // `stat` emits committer statistics as they are found for each file.
 // `done` emits once with a possible error to signal completion.
-func committerCounts(path string, since string) chan Stats {
-	ch := make(chan Stats)
+func committerCounts(path string, since string) chan *Stat {
+	ch := make(chan *Stat)
 
 	if len(since) == 0 {
 		// Calculate 6 months ago from today's date and set the 'since' argument
@@ -71,19 +72,17 @@ func committerCounts(path string, since string) chan Stats {
 			return
 		}
 
-		cmd := strings.Join(
-			[]string{
-				"git shortlog -sne --no-merges",
-				strings.TrimSpace(string(c)) + "..HEAD",
-				path,
-			}, " ")
+		var buffer bytes.Buffer
+		buffer.WriteString("git shortlog -sne --no-merges ")
+		buffer.WriteString(strings.TrimSpace(string(c)))
+		buffer.WriteString("..HEAD ")
+		buffer.WriteString(path)
 
-		out, err := run(cmd)
+		out, err := run(buffer.String())
 		if err != nil {
 			return
 		}
 
-		var stats Stats
 		for _, line := range strings.Split(out, "\n") {
 			line = strings.Trim(line, " ")
 			matches := countExtractor.FindStringSubmatch(line)
@@ -99,10 +98,8 @@ func committerCounts(path string, since string) chan Stats {
 				continue
 			}
 
-			stats = append(stats, Stat{rvwr, cti})
+			ch <- &Stat{rvwr, cti}
 		}
-
-		ch <- stats
 	}()
 
 	return ch

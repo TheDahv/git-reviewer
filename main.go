@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -31,19 +32,6 @@ func main() {
 		" (--ignore-path main.go,src)")
 	op := flag.String("only-path", "", "Only consider file or files under path"+
 		" (--only-path main.go,src)")
-
-	/*
-		// Profiling setup
-		pf, perr := os.Create("gitreviewer.prof")
-		if perr != nil {
-			fmt.Println(perr)
-			return
-		}
-		defer pf.Close()
-
-		pprof.StartCPUProfile(pf)
-		defer pprof.StopCPUProfile()
-	*/
 
 	flag.Parse()
 
@@ -117,10 +105,10 @@ func main() {
 		return
 	}
 
-	fmt.Printf("Reviewers:\n")
-	for _, reviewer := range reviewers {
-		fmt.Println(reviewer)
-	}
+	var buffer bytes.Buffer
+	buffer.WriteString("Reviewers:\n")
+	buffer.WriteString(reviewers)
+	fmt.Println(buffer.String())
 }
 
 // checkDateArg takes a date argument as a YYYY-MM-DD formatted string and
