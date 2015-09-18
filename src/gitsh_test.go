@@ -1,11 +1,5 @@
 package gitreviewers
 
-import (
-	"strconv"
-	"os"
-	"testing"
-)
-
 /*
 func TestCommitterCounts(t *testing.T) {
 	path := os.Getenv("GOPATH") +
@@ -80,3 +74,4 @@ func TestCommitterCountsOnBadPath(t *testing.T) {
 		t.Errorf("Expected no stats back, got %d\n", len(counts))
 	}
 }
+*/
