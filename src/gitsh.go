@@ -1,13 +1,9 @@
 package gitreviewers
 
 import (
-	"bytes"
-	"fmt"
 	"os/exec"
 	rx "regexp"
-	"strconv"
 	"strings"
-	"time"
 )
 
 var countExtractor *rx.Regexp
@@ -31,64 +27,4 @@ func run(cmd string) (string, error) {
 	}
 
 	return string(out), nil
-}
-
-// committerCounts finds recent committers and commit counts for
-// the file at `path`. It uses 2 channels to communicate the state of
-// processing. If `since` is a proper 'YYYY-MM-DD' formatted date, the
-// command will only consider commits for `path` created after the date.
-// Otherwise, it defaults to 6 months before the current day.
-//
-// `stat` emits committer statistics as they are found for each file.
-// `done` emits once with a possible error to signal completion.
-func committerCounts(path string, since string) chan *Stat {
-	ch := make(chan *Stat)
-
-	if len(since) == 0 {
-		// Calculate 6 months ago from today's date and set the 'since' argument
-		since = time.Now().AddDate(0, -6, 0).Format("2006-01-02")
-	}
-
-	go func() {
-		defer close(ch)
-		c, err := exec.Command(
-			"bash", "-c", "git log --since "+since+" --reverse |"+
-				"head -n 1 | awk '{print $2}'").Output()
-
-		if err != nil {
-			fmt.Printf("Got error: '%v'. Bailing\n", err)
-			return
-		}
-
-		var buffer bytes.Buffer
-		buffer.WriteString("git shortlog -sne --no-merges ")
-		buffer.WriteString(strings.TrimSpace(string(c)))
-		buffer.WriteString("..HEAD ")
-		buffer.WriteString(path)
-
-		out, err := run(buffer.String())
-		if err != nil {
-			return
-		}
-
-		for _, line := range strings.Split(out, "\n") {
-			line = strings.Trim(line, " ")
-			matches := countExtractor.FindStringSubmatch(line)
-			if len(matches) < 3 {
-				continue
-			}
-
-			ct := matches[1]
-			rvwr := matches[2]
-
-			cti, err := strconv.Atoi(ct)
-			if err != nil {
-				continue
-			}
-
-			ch <- &Stat{rvwr, cti}
-		}
-	}()
-
-	return ch
 }

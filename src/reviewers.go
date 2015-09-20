@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	gg "github.com/libgit2/git2go"
 )
@@ -338,47 +339,168 @@ func considerPath(path string, opts *Reviewer) bool {
 // FindReviewers returns up to 3 of the top reviewers information as determined
 // by cumulative commit count across all files in `paths`.
 func (r *Reviewer) FindReviewers(paths []string) (string, error) {
-	cs := make([]chan *Stat, len(paths))
-	for i, path := range paths {
-		cs[i] = committerCounts(path, r.Since)
+	var (
+		rg        runGuard
+		rw        *gg.RevWalk
+		since     time.Time
+		reviewers map[string]int
+		ptable    map[string]struct{}
+		final     Stats
+	)
+
+	reviewers = make(map[string]int)
+
+	if len(r.Since) > 0 {
+		var err error
+		since, err = time.Parse("2006-01-02", r.Since)
+		if err != nil {
+			if r.Verbose {
+				fmt.Println("Unable to parse 'since'")
+			}
+			return "", err
+		}
+	} else {
+		// Calculate 6 months ago from today's date and set the 'since' argument
+		since = time.Now().AddDate(0, -6, 0)
 	}
 
-	data := mergeChans(cs...)
-
-	set := make(map[string]*Stat)
-	for stat := range data {
-		if len(stat.Reviewer) > 0 {
-			if s, ok := set[stat.Reviewer]; ok {
-				s.Count += stat.Count
-			} else {
-				set[stat.Reviewer] = stat
+	// Cleanup
+	defer func() {
+		objs := [...]freeable{
+			rw,
+		}
+		for _, obj := range objs {
+			if obj != nil {
+				obj.Free()
 			}
 		}
+	}()
+
+	// Set up lookup table to keep track if a commit reflects history
+	// on the paths affected in the branch
+	ptable = make(map[string]struct{})
+	for _, p := range paths {
+		ptable[p] = struct{}{}
 	}
 
-	// Boil to set
-	final := make(Stats, len(set))
-	i := 0
-	for _, val := range set {
-		final[i] = val
-		i++
+	// Iterate through commits in the review period
+	rg.maybeRun(func() {
+		var err error
+		if rw, err = r.Repo.Walk(); err != nil {
+			rg.err = err
+			rg.msg = "Issue opening revwalk"
+		}
+	})
+
+	rg.maybeRun(func() {
+		var err error
+		// TODO push master, not HEAD
+		if err = rw.PushHead(); err != nil {
+			rg.err = err
+			rg.msg = "Issue pushing HEAD onto revwalk"
+		}
+	})
+
+	// For each of our commits in the review period, see if it affects
+	// at least one of the paths changed in the branch. If so, the commit
+	// author is added to the count of contributors with experience with one
+	// of the changed files in our branch.
+	rg.maybeRun(func() {
+		var err error
+
+		// Revwalk.Iterate walks through commits until the
+		// RevWalkIterator returns false.
+		err = rw.Iterate(func(c *gg.Commit) bool {
+			var (
+				err  error
+				tree *gg.Tree
+			)
+			defer c.Free()
+
+			sig := c.Committer()
+
+			// Stop walking commits since we've passed 'since'
+			if sig.When.Before(since) {
+				return false
+			}
+
+			tree, err = c.Tree()
+			if err != nil {
+				rg.err = err
+				return false
+			}
+
+			// Search for our desired paths in this commit and register the committer
+			// if there is one
+			hasCommit := false
+			err = tree.Walk(func(s string, te *gg.TreeEntry) int {
+				if gg.FilemodeBlob != te.Filemode {
+					return 0
+				}
+
+				if _, ok := ptable[s+te.Name]; ok {
+					hasCommit = true
+				}
+
+				return 0
+			})
+
+			if err != nil {
+				rg.err = err
+				return false
+			}
+
+			if hasCommit {
+				k := reviewerKey(sig)
+				if _, ok := reviewers[k]; ok {
+					reviewers[k]++
+				} else {
+					reviewers[k] = 1
+				}
+			}
+
+			return true
+		})
+
+		if err != nil {
+			rg.err = err
+			rg.msg = "Error iterating through rev walk"
+		}
+	})
+
+	if rg.err != nil {
+		fmt.Println(rg.msg)
+		fmt.Println(rg.err)
+
+		return "", rg.err
 	}
 
-	// Grab top 3 reviewers and return string lines
-	var buffer bytes.Buffer
+	final = make(Stats, len(reviewers))
+	idx := 0
+	for reviewer, count := range reviewers {
+		final[idx] = &Stat{reviewer, count}
+		idx++
+	}
+
 	maxStats := 3
 	if l := len(final); l < maxStats {
 		maxStats = l
 	}
-
 	topN := chooseTopN(maxStats, final)
 
+	var buffer bytes.Buffer
 	for i := range topN {
 		buffer.WriteString(topN[i].String())
 		buffer.WriteString("\n")
 	}
 
 	return buffer.String(), nil
+}
+
+func reviewerKey(sig *gg.Signature) string {
+	// TODO Use .mailmap to normalize Name and Email
+
+	return fmt.Sprintf("%s <%s>", sig.Name, sig.Email)
 }
 
 func chooseTopN(n int, s Stats) Stats {
