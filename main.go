@@ -9,8 +9,8 @@ import (
 	"regexp"
 	"strings"
 
-	gg "github.com/libgit2/git2go"
 	gr "github.com/thedahv/git-reviewer/src"
+	gg "github.com/thedahv/git2go"
 )
 
 // dateRx helps us ensure date arguments confirm to YYYY-MM-DD format

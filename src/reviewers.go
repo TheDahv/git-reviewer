@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	gg "github.com/libgit2/git2go"
+	gg "github.com/thedahv/git2go"
 )
 
 var (
