@@ -1,16 +1,148 @@
 package gitreviewers
 
 import (
+	"bufio"
 	"bytes"
 	"container/heap"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	gg "github.com/libgit2/git2go"
 )
+
+var (
+	mailmap    map[string]string
+	useMailmap = false
+)
+
+func init() {
+	var (
+		rg  runGuard
+		cwd string
+	)
+
+	rg.maybeRun(func() {
+		var err error
+
+		cwd, err = os.Getwd()
+		if err != nil {
+			rg.err = err
+			rg.msg = "Error determining current working directory"
+		}
+	})
+
+	mailmap = make(map[string]string)
+
+	// Check for profile mailmap
+	rg.maybeRun(func() {
+		cp, err := gg.ConfigFindGlobal()
+		if err != nil {
+			fmt.Printf("Error finding global config: %v\n", err)
+			return
+		}
+
+		conf, err := gg.OpenOndisk(&gg.Config{}, cp)
+		if err != nil {
+			return
+		}
+		defer conf.Free()
+
+		path, err := conf.LookupString("mailmap.file")
+		if err != nil {
+			fmt.Printf("Error lookup up mailmap file %v\n", err)
+			return
+		}
+
+		f, err := os.Open(path)
+		defer f.Close()
+		if err != nil {
+			return
+		}
+
+		readMailmap(mailmap, f)
+		useMailmap = true
+	})
+
+	// Parse project mailmap last so it overrides
+	rg.maybeRun(func() {
+		f, err := os.Open(cwd + ".mailmap")
+		defer f.Close()
+		if err != nil {
+			return
+		}
+
+		readMailmap(mailmap, f)
+		useMailmap = true
+	})
+
+	// Check for any errors that might have happened
+	if rg.err != nil {
+		useMailmap = false
+		fmt.Println("Error starting up! We can't read the mailmap file!")
+		fmt.Println(rg.err.Error())
+
+		// If we're left with an error by now, we should stop
+		panic(rg.err)
+	}
+}
+
+func readMailmap(mm map[string]string, f *os.File) {
+	// See git C implementation of parse_name_and_email for reference
+	// https://github.com/git/git/blob/master/mailmap.c
+	var (
+		line    []byte
+		err     error
+		lastPos int
+	)
+	var name1, email1, name2, email2 string
+
+	rdr := bufio.NewReader(f)
+
+	for {
+		line, err = rdr.ReadBytes('\n')
+		if err != nil {
+			// TODO Handle non-EOF errors
+			break
+		}
+
+		if line[0] != '#' {
+			name1, email1, lastPos = parseMailmapLine(line, 0)
+
+			if lastPos > 0 {
+				name2, email2, _ = parseMailmapLine(line, lastPos)
+
+				mm[name2] = name1
+				mm[email2] = email1
+			}
+		}
+		// TODO Implement repo-abbrev parsing. I have no idea what that is
+	}
+}
+
+func parseMailmapLine(line []byte, offset int) (name string, email string, right int) {
+	var left int
+
+	left = bytes.IndexRune(line[offset:], '<')
+	if left < 0 {
+		return
+	}
+
+	right = bytes.IndexRune(line[offset+left:], '>')
+	if right < 0 {
+		return
+	}
+	// Account for the fact we got the index of a sub-slice
+	right = left + right
+
+	name = string(bytes.TrimSpace(line[:offset+left]))
+	email = string(bytes.TrimSpace(line[offset+left+1 : offset+right]))
+
+	return
+}
 
 // Stat contains contributor name and commit count summary. It is
 // well-suited for capturing information returned from git shortlog.
@@ -498,9 +630,22 @@ func (r *Reviewer) FindReviewers(paths []string) (string, error) {
 }
 
 func reviewerKey(sig *gg.Signature) string {
-	// TODO Use .mailmap to normalize Name and Email
+	var name, email string
 
-	return fmt.Sprintf("%s <%s>", sig.Name, sig.Email)
+	if useMailmap {
+		var ok bool
+		if name, ok = mailmap[sig.Name]; ok == false {
+			name = sig.Name
+		}
+		if email, ok = mailmap[sig.Email]; ok == false {
+			name = sig.Email
+		}
+	} else {
+		name = sig.Name
+		email = sig.Email
+	}
+
+	return fmt.Sprintf("%s <%s>", name, email)
 }
 
 func chooseTopN(n int, s Stats) Stats {
