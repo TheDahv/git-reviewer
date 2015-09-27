@@ -476,7 +476,6 @@ func (r *Reviewer) FindReviewers(paths []string) (string, error) {
 		rw        *gg.RevWalk
 		since     time.Time
 		reviewers map[string]int
-		ptable    map[string]struct{}
 		final     Stats
 	)
 
@@ -507,13 +506,6 @@ func (r *Reviewer) FindReviewers(paths []string) (string, error) {
 			}
 		}
 	}()
-
-	// Set up lookup table to keep track if a commit reflects history
-	// on the paths affected in the branch
-	ptable = make(map[string]struct{})
-	for _, p := range paths {
-		ptable[p] = struct{}{}
-	}
 
 	// Iterate through commits in the review period
 	rg.maybeRun(func() {
@@ -562,32 +554,19 @@ func (r *Reviewer) FindReviewers(paths []string) (string, error) {
 				return false
 			}
 
-			// Search for our desired paths in this commit and register the committer
-			// if there is one
-			hasCommit := false
-			err = tree.Walk(func(s string, te *gg.TreeEntry) int {
-				if gg.FilemodeBlob != te.Filemode {
-					return 0
-				}
+			// Check desired paths to see if one exists in the commit tree
+			for _, p := range paths {
+				te := tree.EntryByName(p)
+				if te != nil {
+					k := reviewerKey(sig)
+					if _, ok := reviewers[k]; ok {
+						reviewers[k]++
+					} else {
+						reviewers[k] = 1
+					}
 
-				if _, ok := ptable[s+te.Name]; ok {
-					hasCommit = true
-				}
-
-				return 0
-			})
-
-			if err != nil {
-				rg.err = err
-				return false
-			}
-
-			if hasCommit {
-				k := reviewerKey(sig)
-				if _, ok := reviewers[k]; ok {
-					reviewers[k]++
-				} else {
-					reviewers[k] = 1
+					// We found a path on the commit, no need to double-count
+					break
 				}
 			}
 
