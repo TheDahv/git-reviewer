@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	gg "github.com/thedahv/git2go"
@@ -641,29 +640,4 @@ func chooseTopN(n int, s Stats) Stats {
 	}
 
 	return top
-}
-
-func mergeChans(cs ...chan *Stat) chan *Stat {
-	// https://blog.golang.org/pipelines
-	var wg sync.WaitGroup
-	out := make(chan *Stat)
-
-	output := func(c <-chan *Stat) {
-		for n := range c {
-			out <- n
-		}
-		wg.Done()
-	}
-	wg.Add(len(cs))
-
-	for _, c := range cs {
-		go output(c)
-	}
-
-	go func() {
-		wg.Wait()
-		close(out)
-	}()
-
-	return out
 }
