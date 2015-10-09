@@ -513,6 +513,8 @@ func (r *Reviewer) FindReviewers(paths []string) (string, error) {
 			rg.err = err
 			rg.msg = "Issue opening revwalk"
 		}
+
+		rw.Sorting(gg.SortTime | gg.SortTopological)
 	})
 
 	rg.maybeRun(func() {
@@ -555,7 +557,11 @@ func (r *Reviewer) FindReviewers(paths []string) (string, error) {
 
 			// Check desired paths to see if one exists in the commit tree
 			for _, p := range paths {
-				te := tree.EntryByName(p)
+				te, err := tree.EntryByPath(p)
+				if err != nil {
+					continue
+				}
+
 				if te != nil {
 					k := reviewerKey(sig)
 					if _, ok := reviewers[k]; ok {
