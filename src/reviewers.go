@@ -1,12 +1,147 @@
 package gitreviewers
 
 import (
+	"bufio"
 	"bytes"
 	"container/heap"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
-	"sync"
+	"time"
+
+	gg "github.com/libgit2/git2go"
 )
+
+var (
+	mailmap    map[string]string
+	useMailmap = false
+)
+
+func init() {
+	var (
+		rg  runGuard
+		cwd string
+	)
+
+	rg.maybeRun(func() {
+		var err error
+
+		cwd, err = os.Getwd()
+		if err != nil {
+			rg.err = err
+			rg.msg = "Error determining current working directory"
+		}
+	})
+
+	mailmap = make(map[string]string)
+
+	// Check for profile mailmap
+	rg.maybeRun(func() {
+		cp, err := gg.ConfigFindGlobal()
+		if err != nil {
+			fmt.Printf("Error finding global config: %v\n", err)
+			return
+		}
+
+		conf, err := gg.OpenOndisk(&gg.Config{}, cp)
+		if err != nil {
+			return
+		}
+		defer conf.Free()
+
+		path, err := conf.LookupString("mailmap.file")
+		if err != nil {
+			fmt.Printf("Error lookup up mailmap file %v\n", err)
+			return
+		}
+
+		f, err := os.Open(path)
+		defer f.Close()
+		if err != nil {
+			return
+		}
+
+		readMailmap(mailmap, f)
+		useMailmap = true
+	})
+
+	// Parse project mailmap last so it overrides
+	rg.maybeRun(func() {
+		f, err := os.Open(cwd + ".mailmap")
+		defer f.Close()
+		if err != nil {
+			return
+		}
+
+		readMailmap(mailmap, f)
+		useMailmap = true
+	})
+
+	// Check for any errors that might have happened
+	if rg.err != nil {
+		useMailmap = false
+		fmt.Println("Error starting up! We can't read the mailmap file!")
+		fmt.Println(rg.err.Error())
+
+		// If we're left with an error by now, we should stop
+		panic(rg.err)
+	}
+}
+
+func readMailmap(mm map[string]string, f *os.File) {
+	// See git C implementation of parse_name_and_email for reference
+	// https://github.com/git/git/blob/master/mailmap.c
+	var (
+		line    []byte
+		err     error
+		lastPos int
+	)
+	var name1, email1, name2, email2 string
+
+	rdr := bufio.NewReader(f)
+
+	for {
+		line, err = rdr.ReadBytes('\n')
+		if err != nil {
+			// TODO Handle non-EOF errors
+			break
+		}
+
+		if line[0] != '#' {
+			name1, email1, lastPos = parseMailmapLine(line, 0)
+
+			if lastPos > 0 {
+				name2, email2, _ = parseMailmapLine(line, lastPos)
+
+				mm[name2] = name1
+				mm[email2] = email1
+			}
+		}
+		// TODO Implement repo-abbrev parsing. I have no idea what that is
+	}
+}
+
+func parseMailmapLine(line []byte, offset int) (name string, email string, right int) {
+	var left int
+
+	left = bytes.IndexRune(line[offset:], '<')
+	if left < 0 {
+		return
+	}
+
+	right = bytes.IndexRune(line[offset+left:], '>')
+	if right < 0 {
+		return
+	}
+	// Account for the fact we got the index of a sub-slice
+	right = left + right
+
+	name = string(bytes.TrimSpace(line[:offset+left]))
+	email = string(bytes.TrimSpace(line[offset+left+1 : offset+right]))
+
+	return
+}
 
 // Stat contains contributor name and commit count summary. It is
 // well-suited for capturing information returned from git shortlog.
@@ -68,6 +203,7 @@ func (s *Stats) Push(val interface{}) {
 
 // Reviewer manages the operations and sequencing of the branch reviewer
 type Reviewer struct {
+	Repo              *gg.Repository
 	ShowFiles         bool
 	Verbose           bool
 	Since             string
@@ -75,6 +211,12 @@ type Reviewer struct {
 	OnlyExtensions    []string
 	IgnoredPaths      []string
 	OnlyPaths         []string
+}
+
+// freeable makes it easier for us to deal with objects of all types
+// that require being freed at the end of a function.
+type freeable interface {
+	Free()
 }
 
 // defaultIgnoreExt represent filetypes that are more often
@@ -90,39 +232,185 @@ var defaultIgnoreExt = []string{
 // BranchBehind is not yet implemented. Determines if the current branch
 // behind master and requires that it be "merged up".
 func (r *Reviewer) BranchBehind() (bool, error) {
-	var master, current string
-	var err error
-
-	if master, err = commitTimeStamp("master"); err != nil {
-		return false, err
+	if r.Repo == nil {
+		return false, errors.New("repo not initialized")
 	}
 
-	if current, err = commitTimeStamp("HEAD"); err != nil {
-		return false, err
-	}
+	var (
+		rg      runGuard
+		mBranch *gg.Branch
+		mCom    *gg.Commit
+		hRef    *gg.Reference
+		hCom    *gg.Commit
+		behind  bool
+	)
 
-	return current < master, nil
+	defer func() {
+		objs := [...]freeable{
+			mBranch,
+			mCom,
+			hRef,
+			hCom,
+		}
+		for _, obj := range objs {
+			obj.Free()
+		}
+	}()
+
+	rg.maybeRun(func() {
+		var err error
+		if mBranch, err = r.Repo.LookupBranch("master", gg.BranchLocal); err != nil {
+			rg.err = err
+			rg.msg = "Issue opening master branch"
+		}
+	})
+	rg.maybeRun(func() {
+		var err error
+		if mCom, err = r.Repo.LookupCommit(mBranch.Reference.Target()); err != nil {
+			rg.err = err
+			rg.msg = "Issue opening master commit"
+		}
+	})
+	rg.maybeRun(func() {
+		var err error
+		if hRef, err = r.Repo.Head(); err != nil {
+			rg.err = err
+			rg.msg = "Issue opening HEAD reference"
+		}
+	})
+	rg.maybeRun(func() {
+		var err error
+		if hCom, err = r.Repo.LookupCommit(hRef.Target()); err != nil {
+			rg.err = err
+			rg.msg = "Issue opening HEAD commit"
+		}
+	})
+	rg.maybeRun(func() {
+		behind = hCom.Committer().When.Before(mCom.Committer().When)
+	})
+
+	return behind, rg.err
 }
 
 // FindFiles returns a list of paths to files that have been changed
 // in this branch with respect to `master`.
 func (r *Reviewer) FindFiles() ([]string, error) {
-	var lines []string
-	out, err := run("git diff master HEAD --name-only")
+	var (
+		rg      runGuard
+		lines   []string
+		mBranch *gg.Branch
+		hRef    *gg.Reference
+		hCom    *gg.Commit
+		mCom    *gg.Commit
+		mTree   *gg.Tree
+		hTree   *gg.Tree
+		opts    gg.DiffOptions
+		diff    *gg.Diff
+	)
 
-	if err != nil {
-		return lines, err
+	if r.Repo == nil {
+		return lines, errors.New("repo not initialized")
 	}
 
-	for _, line := range strings.Split(out, "\n") {
-		l := strings.Trim(line, " ")
-
-		if len(l) > 0 && considerExt(line, r) && considerPath(line, r) {
-			lines = append(lines, l)
+	defer func() {
+		objs := [...]freeable{
+			mBranch,
+			hRef,
+			hCom,
+			mCom,
+			mTree,
+			hTree,
 		}
+
+		for _, obj := range objs {
+			if obj != nil {
+				obj.Free()
+			}
+		}
+
+		if err := diff.Free(); err != nil && r.Verbose {
+			fmt.Printf("Issue cleaning up diff: '%s'\n", err)
+		}
+	}()
+
+	rg.maybeRun(func() {
+		var err error
+		if mBranch, err = r.Repo.LookupBranch("master", gg.BranchLocal); err != nil {
+			rg.err = err
+			rg.msg = "issue opening master branch"
+		}
+	})
+
+	rg.maybeRun(func() {
+		var err error
+		if mCom, err = r.Repo.LookupCommit(mBranch.Reference.Target()); err != nil {
+			rg.err = err
+			rg.msg = "issue opening commit at master"
+		}
+	})
+
+	rg.maybeRun(func() {
+		var err error
+		if hRef, err = r.Repo.Head(); err != nil {
+			rg.err = err
+			rg.msg = "issue opening repo at HEAD"
+		}
+	})
+
+	rg.maybeRun(func() {
+		var err error
+		if hCom, err = r.Repo.LookupCommit(hRef.Target()); err != nil {
+			rg.err = err
+			rg.msg = "issue opening commit at HEAD"
+		}
+	})
+
+	rg.maybeRun(func() {
+		var err error
+		if mTree, err = mCom.Tree(); err != nil {
+			rg.err = err
+			rg.msg = "issue opening tree at master"
+		}
+	})
+
+	rg.maybeRun(func() {
+		var err error
+		if hTree, err = hCom.Tree(); err != nil {
+			rg.err = err
+			rg.msg = "issue opening tree at HEAD"
+		}
+	})
+
+	rg.maybeRun(func() {
+		var err error
+		if opts, err = gg.DefaultDiffOptions(); err != nil {
+			rg.err = err
+			rg.msg = "issue creating diff options"
+		}
+	})
+
+	rg.maybeRun(func() {
+		var err error
+		if diff, err = r.Repo.DiffTreeToTree(mTree, hTree, &opts); err != nil {
+			rg.err = err
+			rg.msg = "issue finding diff"
+		}
+	})
+
+	rg.maybeRun(func() {
+		diff.ForEach(func(file gg.DiffDelta, progress float64) (
+			gg.DiffForEachHunkCallback, error) {
+
+			lines = append(lines, file.OldFile.Path)
+			return nil, nil
+		}, gg.DiffDetailFiles)
+	})
+
+	if rg.err != nil && rg.msg != "" && r.Verbose {
+		fmt.Printf("Error finding diff files: '%s'\n", rg.msg)
 	}
 
-	return lines, err
+	return lines, rg.err
 }
 
 func considerExt(path string, opts *Reviewer) bool {
@@ -182,47 +470,166 @@ func considerPath(path string, opts *Reviewer) bool {
 // FindReviewers returns up to 3 of the top reviewers information as determined
 // by cumulative commit count across all files in `paths`.
 func (r *Reviewer) FindReviewers(paths []string) (string, error) {
-	cs := make([]chan *Stat, len(paths))
-	for i, path := range paths {
-		cs[i] = committerCounts(path, r.Since)
+	var (
+		rg        runGuard
+		rw        *gg.RevWalk
+		since     time.Time
+		reviewers map[string]int
+		final     Stats
+	)
+
+	reviewers = make(map[string]int)
+
+	if len(r.Since) > 0 {
+		var err error
+		since, err = time.Parse("2006-01-02", r.Since)
+		if err != nil {
+			if r.Verbose {
+				fmt.Println("Unable to parse 'since'")
+			}
+			return "", err
+		}
+	} else {
+		// Calculate 6 months ago from today's date and set the 'since' argument
+		since = time.Now().AddDate(0, -6, 0)
 	}
 
-	data := mergeChans(cs...)
-
-	set := make(map[string]*Stat)
-	for stat := range data {
-		if len(stat.Reviewer) > 0 {
-			if s, ok := set[stat.Reviewer]; ok {
-				s.Count += stat.Count
-			} else {
-				set[stat.Reviewer] = stat
+	// Cleanup
+	defer func() {
+		objs := [...]freeable{
+			rw,
+		}
+		for _, obj := range objs {
+			if obj != nil {
+				obj.Free()
 			}
 		}
+	}()
+
+	// Iterate through commits in the review period
+	rg.maybeRun(func() {
+		var err error
+		if rw, err = r.Repo.Walk(); err != nil {
+			rg.err = err
+			rg.msg = "Issue opening revwalk"
+		}
+
+		rw.Sorting(gg.SortTime | gg.SortTopological)
+	})
+
+	rg.maybeRun(func() {
+		var err error
+		// TODO push master, not HEAD
+		if err = rw.PushHead(); err != nil {
+			rg.err = err
+			rg.msg = "Issue pushing HEAD onto revwalk"
+		}
+	})
+
+	// For each of our commits in the review period, see if it affects
+	// at least one of the paths changed in the branch. If so, the commit
+	// author is added to the count of contributors with experience with one
+	// of the changed files in our branch.
+	rg.maybeRun(func() {
+		var err error
+
+		// Revwalk.Iterate walks through commits until the
+		// RevWalkIterator returns false.
+		err = rw.Iterate(func(c *gg.Commit) bool {
+			var (
+				err  error
+				tree *gg.Tree
+			)
+			defer c.Free()
+
+			sig := c.Committer()
+
+			// Stop walking commits since we've passed 'since'
+			if sig.When.Before(since) {
+				return false
+			}
+
+			tree, err = c.Tree()
+			if err != nil {
+				rg.err = err
+				return false
+			}
+
+			// Check desired paths to see if one exists in the commit tree
+			for _, p := range paths {
+				te, err := tree.EntryByPath(p)
+				if err != nil {
+					continue
+				}
+
+				if te != nil {
+					k := reviewerKey(sig)
+					if _, ok := reviewers[k]; ok {
+						reviewers[k]++
+					} else {
+						reviewers[k] = 1
+					}
+
+					// We found a path on the commit, no need to double-count
+					break
+				}
+			}
+
+			return true
+		})
+
+		if err != nil {
+			rg.err = err
+			rg.msg = "Error iterating through rev walk"
+		}
+	})
+
+	if rg.err != nil {
+		fmt.Println(rg.msg)
+		fmt.Println(rg.err)
+
+		return "", rg.err
 	}
 
-	// Boil to set
-	final := make(Stats, len(set))
-	i := 0
-	for _, val := range set {
-		final[i] = val
-		i++
+	final = make(Stats, len(reviewers))
+	idx := 0
+	for reviewer, count := range reviewers {
+		final[idx] = &Stat{reviewer, count}
+		idx++
 	}
 
-	// Grab top 3 reviewers and return string lines
-	var buffer bytes.Buffer
 	maxStats := 3
 	if l := len(final); l < maxStats {
 		maxStats = l
 	}
-
 	topN := chooseTopN(maxStats, final)
 
+	var buffer bytes.Buffer
 	for i := range topN {
 		buffer.WriteString(topN[i].String())
 		buffer.WriteString("\n")
 	}
 
 	return buffer.String(), nil
+}
+
+func reviewerKey(sig *gg.Signature) string {
+	var name, email string
+
+	if useMailmap {
+		var ok bool
+		if name, ok = mailmap[sig.Name]; ok == false {
+			name = sig.Name
+		}
+		if email, ok = mailmap[sig.Email]; ok == false {
+			name = sig.Email
+		}
+	} else {
+		name = sig.Name
+		email = sig.Email
+	}
+
+	return fmt.Sprintf("%s <%s>", name, email)
 }
 
 func chooseTopN(n int, s Stats) Stats {
@@ -239,29 +646,4 @@ func chooseTopN(n int, s Stats) Stats {
 	}
 
 	return top
-}
-
-func mergeChans(cs ...chan *Stat) chan *Stat {
-	// https://blog.golang.org/pipelines
-	var wg sync.WaitGroup
-	out := make(chan *Stat)
-
-	output := func(c <-chan *Stat) {
-		for n := range c {
-			out <- n
-		}
-		wg.Done()
-	}
-	wg.Add(len(cs))
-
-	for _, c := range cs {
-		go output(c)
-	}
-
-	go func() {
-		wg.Wait()
-		close(out)
-	}()
-
-	return out
 }

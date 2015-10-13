@@ -5,9 +5,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
+	gg "github.com/libgit2/git2go"
 	gr "github.com/thedahv/git-reviewer/src"
 )
 
@@ -54,14 +56,27 @@ func main() {
 		return
 	}
 
+	dir, err := os.Getwd()
+	if err != nil {
+		fmt.Printf("Unable to open current directory: %v\n", err)
+		return
+	}
+
+	repo, err := gg.OpenRepository(dir)
+	if err != nil {
+		fmt.Printf("Unable to open repository: %v\n", err)
+		return
+	}
+
 	r := gr.Reviewer{
-		*showFiles,
-		*verbose,
-		*since,
-		ignoredExtensions,
-		onlyExtensions,
-		ignoredPaths,
-		onlyPaths,
+		Repo:              repo,
+		ShowFiles:         *showFiles,
+		Verbose:           *verbose,
+		Since:             *since,
+		IgnoredExtensions: ignoredExtensions,
+		OnlyExtensions:    onlyExtensions,
+		IgnoredPaths:      ignoredPaths,
+		OnlyPaths:         onlyPaths,
 	}
 
 	// Determine if branch is reviewable
