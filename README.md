@@ -30,8 +30,9 @@ If you have Go install:
 * Install `libgit2` on your machine (see "Contributing")
 * `go get github.com/thedahv/git-reviewer`
 
-If you don't, then you will be quite pleased when I upload binaries for your
-system, but I haven't done that yet.
+If you don't, head over to the [releases](https://github.com/TheDahv/git-reviewer/releases)
+page to find a binary for your system. Until I improve my build tools, I will only have
+binaries for OSX and Linux.
 
 ## Contributing
 
