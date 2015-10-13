@@ -69,14 +69,14 @@ func main() {
 	}
 
 	r := gr.Reviewer{
-		repo,
-		*showFiles,
-		*verbose,
-		*since,
-		ignoredExtensions,
-		onlyExtensions,
-		ignoredPaths,
-		onlyPaths,
+		Repo:              repo,
+		ShowFiles:         *showFiles,
+		Verbose:           *verbose,
+		Since:             *since,
+		IgnoredExtensions: ignoredExtensions,
+		OnlyExtensions:    onlyExtensions,
+		IgnoredPaths:      ignoredPaths,
+		OnlyPaths:         onlyPaths,
 	}
 
 	// Determine if branch is reviewable
