@@ -507,7 +507,7 @@ func reviewerKey(sig *gg.Signature) string {
 			name = sig.Name
 		}
 		if email, ok = mm[sig.Email]; ok == false {
-			name = sig.Email
+			email = sig.Email
 		}
 	} else {
 		name = sig.Name

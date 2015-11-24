@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 
 	gg "github.com/libgit2/git2go"
@@ -76,7 +77,9 @@ func readMailmap() (mailmap, error) {
 			return
 		}
 
-		readMailmapFromFile(mm, f)
+		if err := readMailmapFromSource(mm, f); err != nil {
+			return
+		}
 		useMailmap = true
 	})
 
@@ -88,7 +91,9 @@ func readMailmap() (mailmap, error) {
 			return
 		}
 
-		readMailmapFromFile(mm, f)
+		if err := readMailmapFromSource(mm, f); err != nil {
+			return
+		}
 	})
 
 	// Check for any errors that might have happened
@@ -99,37 +104,53 @@ func readMailmap() (mailmap, error) {
 	return mm, nil
 }
 
-func readMailmapFromFile(mm map[string]string, f *os.File) {
+func readMailmapFromSource(mm mailmap, src io.Reader) error {
 	// See git C implementation of parse_name_and_email for reference
 	// https://github.com/git/git/blob/master/mailmap.c
-	var (
-		line    []byte
-		err     error
-		lastPos int
-	)
-	var name1, email1, name2, email2 string
+	scanner := bufio.NewScanner(src)
 
-	rdr := bufio.NewReader(f)
+	for scanner.Scan() {
+		line := scanner.Bytes()
 
-	for {
-		line, err = rdr.ReadBytes('\n')
-		if err != nil {
-			// TODO Handle non-EOF errors
-			break
+		// Skip comments and blank lines
+		if len(line) == 0 || line[0] == '#' {
+			continue
 		}
 
-		if line[0] != '#' {
-			name1, email1, lastPos = parseMailmapLine(line, 0)
+		name1, email1, read := parseMailmapLine(line, 0)
 
-			if lastPos > 0 {
-				name2, email2, _ = parseMailmapLine(line, lastPos)
+		// Simple unaliased mapping: e.g. "Name <email>"
+		if len(name1) > 0 {
+			mm[name1] = name1
+		}
+		if len(email1) > 0 {
+			mm[email1] = email1
+		}
 
-				mm[name2] = name1
-				mm[email2] = email1
+		if read > 0 {
+			name2, email2, _ := parseMailmapLine(line, read)
+
+			if len(name1) > 0 {
+				if len(name2) > 0 {
+					mm[name2] = name1
+				} else {
+					mm[name1] = name1
+				}
+			}
+
+			if len(email1) > 0 {
+				if len(email2) > 0 {
+					mm[email2] = email1
+				} else {
+					mm[email1] = email1
+				}
 			}
 		}
+
 		// TODO Implement repo-abbrev parsing. I have no idea what that is
 	}
+
+	return scanner.Err()
 }
 
 func parseMailmapLine(line []byte, offset int) (name string, email string, right int) {
@@ -140,15 +161,16 @@ func parseMailmapLine(line []byte, offset int) (name string, email string, right
 		return
 	}
 
-	right = bytes.IndexRune(line[offset+left:], '>')
+	right = bytes.IndexRune(line[offset:], '>')
 	if right < 0 {
 		return
 	}
-	// Account for the fact we got the index of a sub-slice
-	right = left + right
 
-	name = string(bytes.TrimSpace(line[:offset+left]))
+	name = string(bytes.TrimSpace(line[offset : offset+left]))
 	email = string(bytes.TrimSpace(line[offset+left+1 : offset+right]))
+
+	// Turn a 0-based index into a length and account for offset
+	right = right + offset + 1
 
 	return
 }
