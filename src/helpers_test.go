@@ -1,6 +1,7 @@
 package gitreviewers
 
 import (
+	"io"
 	"strings"
 	"testing"
 )
@@ -9,19 +10,21 @@ type mapping struct {
 	From, To string
 }
 
+var mapcontent = `# A comment followed by a blank line
+
+Abraham Lincoln <abe@git-reviewer.com>
+<abe@git-reviewer.com> <abe@gmail.com>
+George Washington <george@git-reviewer.com> <george@gmail.com>
+George Washington <george@git-reviewer.com>  G-Money Washington <george@gmail.com>
+`
+
 func TestParseMailmap(t *testing.T) {
 	cases := []struct {
 		Input    string
 		Mappings []mapping
 	}{
 		{
-			Input: `# A comment followed by a blank line
-
-Abraham Lincoln <abe@git-reviewer.com>
-<abe@git-reviewer.com> <abe@gmail.com>
-George Washington <george@git-reviewer.com> <george@gmail.com>
-George Washington <george@git-reviewer.com>  G-Money Washington <george@gmail.com>
-`,
+			Input: mapcontent,
 			Mappings: []mapping{
 				{"Abraham Lincoln", "Abraham Lincoln"},
 				{"abe@gmail.com", "abe@git-reviewer.com"},
@@ -47,6 +50,19 @@ George Washington <george@git-reviewer.com>  G-Money Washington <george@gmail.co
 					m.From, actual, m.To)
 			}
 		}
+	}
+}
+
+func BenchmarkParseMailmap(t *testing.B) {
+	var (
+		mm  mailmap
+		rdr io.Reader
+	)
+
+	for i := 0; i < t.N; i++ {
+		rdr = strings.NewReader(mapcontent)
+		mm = make(mailmap)
+		readMailmapFromSource(mm, rdr)
 	}
 }
 
