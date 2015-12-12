@@ -13,6 +13,8 @@ import (
 	gr "github.com/thedahv/git-reviewer/src"
 )
 
+const version = "0.0.2"
+
 // dateRx helps us ensure date arguments confirm to YYYY-MM-DD format
 var dateRx *regexp.Regexp
 
@@ -34,8 +36,14 @@ func main() {
 		" (--ignore-path main.go,src)")
 	op := flag.String("only-path", "", "Only consider file or files under path"+
 		" (--only-path main.go,src)")
+	v := flag.Bool("version", false, "Print the program version and exit")
 
 	flag.Parse()
+
+	if *v {
+		fmt.Printf("git-reviewer version %s\n", version)
+		return
+	}
 
 	spaceOrComma := func(r rune) bool {
 		switch r {

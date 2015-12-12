@@ -20,6 +20,7 @@ Usage of git-reviewer:
   -since="": Consider commits after date when finding reviewers. Defaults to 6 months ago
      (format 'YYYY-MM-DD')
   -verbose=false: Show progress and errors information
+  -version=false: Print the program version and exit
 ```
 
 ## Installing
