@@ -80,7 +80,6 @@ func readMailmap() (mailmap, error) {
 		if err := readMailmapFromSource(mm, f); err != nil {
 			return
 		}
-		useMailmap = true
 	})
 
 	// Parse project mailmap last so it overrides

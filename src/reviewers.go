@@ -11,23 +11,6 @@ import (
 	gg "github.com/libgit2/git2go"
 )
 
-var (
-	mm         mailmap
-	useMailmap = false
-)
-
-func init() {
-	// If we're left with an error by now, we should stop
-	mm, err := readMailmap()
-	if err != nil {
-		fmt.Println("Error starting up! We can't read the mailmap file!")
-		fmt.Println(err.Error())
-		panic(err)
-	}
-
-	useMailmap = len(mm) > 0
-}
-
 // Stat contains contributor name and commit count summary. It is
 // well-suited for capturing information returned from git shortlog.
 type Stat struct {
@@ -363,6 +346,7 @@ func (r *Reviewer) FindReviewers(paths []string) (string, error) {
 		final     Stats
 	)
 
+	mm, _ := readMailmap()
 	reviewers = make(map[string]int)
 
 	if len(r.Since) > 0 {
@@ -448,7 +432,7 @@ func (r *Reviewer) FindReviewers(paths []string) (string, error) {
 				}
 
 				if te != nil {
-					k := reviewerKey(sig)
+					k := reviewerKey(sig, mm)
 					if _, ok := reviewers[k]; ok {
 						reviewers[k]++
 					} else {
@@ -498,19 +482,17 @@ func (r *Reviewer) FindReviewers(paths []string) (string, error) {
 	return buffer.String(), nil
 }
 
-func reviewerKey(sig *gg.Signature) string {
-	var name, email string
+func reviewerKey(sig *gg.Signature, mm mailmap) string {
+	var (
+		name, email string
+		ok          bool
+	)
 
-	if useMailmap {
-		var ok bool
-		if name, ok = mm[sig.Name]; ok == false {
-			name = sig.Name
-		}
-		if email, ok = mm[sig.Email]; ok == false {
-			email = sig.Email
-		}
-	} else {
+	if name, ok = mm[sig.Name]; !ok {
 		name = sig.Name
+	}
+
+	if email, ok = mm[sig.Email]; !ok {
 		email = sig.Email
 	}
 
