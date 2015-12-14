@@ -14,8 +14,8 @@ import (
 // Stat contains contributor name and commit count summary. It is
 // well-suited for capturing information returned from git shortlog.
 type Stat struct {
-	Reviewer string
-	Count    int
+	Reviewer   string
+	Percentage float64
 }
 
 // Carries information for the completion and possible error of
@@ -27,7 +27,7 @@ type statResp struct {
 
 // String shows Stat information in a format suitable for shell reporting.
 func (cs *Stat) String() string {
-	return fmt.Sprintf("  %d\t%s", cs.Count, cs.Reviewer)
+	return fmt.Sprintf("  %.2f%%\t%s", cs.Percentage*100.0, cs.Reviewer)
 }
 
 // Stats is a convenience type that lets us implement the heap interface.
@@ -42,7 +42,8 @@ func (s Stats) Len() int {
 func (s Stats) Less(i, j int) bool {
 	// We want Pop to give us the highest, not lowest, priority so we
 	// use greater than here.
-	return s[i].Count > s[j].Count
+	//return s[i].Count > s[j].Count
+	return s[i].Percentage > s[j].Percentage
 }
 
 // Swap moves elements around to their proper location in the heap
@@ -339,15 +340,17 @@ func considerPath(path string, opts *Reviewer) bool {
 // by cumulative commit count across all files in `paths`.
 func (r *Reviewer) FindReviewers(paths []string) (string, error) {
 	var (
-		rg        runGuard
-		rw        *gg.RevWalk
-		since     time.Time
-		reviewers map[string]int
-		final     Stats
+		rg                 runGuard
+		rw                 *gg.RevWalk
+		since              time.Time
+		final              Stats
+		opts               gg.BlameOptions
+		totalLines         uint16
+		linesByCommiter    = make(map[string]uint16)
+		commitersByPercent = make(map[string]float64)
 	)
 
 	mm, _ := readMailmap()
-	reviewers = make(map[string]int)
 
 	if len(r.Since) > 0 {
 		var err error
@@ -375,6 +378,15 @@ func (r *Reviewer) FindReviewers(paths []string) (string, error) {
 		}
 	}()
 
+	rg.maybeRun(func() {
+		var err error
+
+		if opts, err = gg.DefaultBlameOptions(); err != nil {
+			rg.err = err
+			rg.msg = "Issue creating blame options"
+		}
+	})
+
 	// Iterate through commits in the review period
 	rg.maybeRun(func() {
 		var err error
@@ -395,75 +407,43 @@ func (r *Reviewer) FindReviewers(paths []string) (string, error) {
 		}
 	})
 
-	// For each of our commits in the review period, see if it affects
-	// at least one of the paths changed in the branch. If so, the commit
-	// author is added to the count of contributors with experience with one
-	// of the changed files in our branch.
+	// Now that we know the oldest commit, obtain a blame for each file in the
+	// diff and count up experience by lines
 	rg.maybeRun(func() {
-		var err error
-
-		// Revwalk.Iterate walks through commits until the
-		// RevWalkIterator returns false.
-		err = rw.Iterate(func(c *gg.Commit) bool {
-			var (
-				err  error
-				tree *gg.Tree
-			)
-			defer c.Free()
-
-			sig := c.Committer()
-
-			// Stop walking commits since we've passed 'since'
-			if sig.When.Before(since) {
-				return false
-			}
-
-			tree, err = c.Tree()
+		for _, p := range paths {
+			b, err := r.Repo.BlameFile(p, &opts)
 			if err != nil {
-				rg.err = err
-				return false
+				continue
 			}
 
-			// Check desired paths to see if one exists in the commit tree
-			for _, p := range paths {
-				te, err := tree.EntryByPath(p)
-				if err != nil {
+			cnt := b.HunkCount()
+			for i := 0; i < cnt; i++ {
+				h, err := b.HunkByIndex(i)
+
+				// Skip for errors or for hunks that are older than our window of
+				// consideration.
+				if err != nil || h.OrigSignature.When.Before(since) {
 					continue
 				}
 
-				if te != nil {
-					k := reviewerKey(sig, mm)
-					if _, ok := reviewers[k]; ok {
-						reviewers[k]++
-					} else {
-						reviewers[k] = 1
-					}
-
-					// We found a path on the commit, no need to double-count
-					break
-				}
+				k := reviewerKey(h.OrigSignature, mm)
+				linesByCommiter[k] += h.LinesInHunk
+				totalLines += h.LinesInHunk
 			}
 
-			return true
-		})
-
-		if err != nil {
-			rg.err = err
-			rg.msg = "Error iterating through rev walk"
+			b.Free()
 		}
 	})
 
-	if rg.err != nil {
-		fmt.Println(rg.msg)
-		fmt.Println(rg.err)
-
-		return "", rg.err
+	// Calculate percentage of "ownership" by percent of all lines touched
+	for commiter, lines := range linesByCommiter {
+		commitersByPercent[commiter] = float64(lines) / float64(totalLines)
 	}
 
-	final = make(Stats, len(reviewers))
+	final = make(Stats, len(commitersByPercent))
 	idx := 0
-	for reviewer, count := range reviewers {
-		final[idx] = &Stat{reviewer, count}
+	for c, p := range commitersByPercent {
+		final[idx] = &Stat{c, p}
 		idx++
 	}
 
