@@ -32,6 +32,20 @@ func (rg *runGuard) maybeRun(fn func()) {
 	fn()
 }
 
+// maybeRunMany runs the series of operations inside `fn` one after the other.
+// If any function in the sequence saves an error on the run guard, the sequence
+// stops and skips all downstream operations. The final error and an optional
+// message explaining which step in the sequence failed are available to client
+// code.
+func (rg *runGuard) maybeRunMany(fns ...func()) {
+	for _, fn := range fns {
+		if rg.err != nil {
+			break
+		}
+		fn()
+	}
+}
+
 type mailmap map[string]string
 
 func readMailmap() (mailmap, error) {

@@ -76,7 +76,7 @@ func main() {
 		return
 	}
 
-	r := gr.Reviewer{
+	r := gr.ContributionCounter{
 		Repo:              repo,
 		ShowFiles:         *showFiles,
 		Verbose:           *verbose,
