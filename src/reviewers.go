@@ -145,7 +145,7 @@ func (r *ContributionCounter) BranchBehind() (bool, error) {
 func (r *ContributionCounter) FindFiles() ([]string, error) {
 	var (
 		rg      runGuard
-		lines   []string
+		paths   []string
 		mBranch *gg.Branch
 		hRef    *gg.Reference
 		hCom    *gg.Commit
@@ -157,7 +157,7 @@ func (r *ContributionCounter) FindFiles() ([]string, error) {
 	)
 
 	if r.Repo == nil {
-		return lines, errors.New("repo not initialized")
+		return paths, errors.New("repo not initialized")
 	}
 
 	defer func() {
@@ -211,7 +211,11 @@ func (r *ContributionCounter) FindFiles() ([]string, error) {
 			diff.ForEach(func(file gg.DiffDelta, progress float64) (
 				gg.DiffForEachHunkCallback, error) {
 
-				lines = append(lines, file.OldFile.Path)
+				// Only include path if it passes all filters
+				path := file.OldFile.Path
+				if considerExt(path, r) && considerPath(path, r) {
+					paths = append(paths, path)
+				}
 				return nil, nil
 			}, gg.DiffDetailFiles)
 		},
@@ -221,7 +225,7 @@ func (r *ContributionCounter) FindFiles() ([]string, error) {
 		fmt.Printf("Error finding diff files: '%s'\n", rg.msg)
 	}
 
-	return lines, rg.err
+	return paths, rg.err
 }
 
 // considerExt determines whether a path should be used to calculate the final
