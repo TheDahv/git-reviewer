@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -128,10 +127,7 @@ func main() {
 		return
 	}
 
-	var buffer bytes.Buffer
-	buffer.WriteString("Reviewers:\n")
-	buffer.WriteString(reviewers)
-	fmt.Println(buffer.String())
+	fmt.Println(reviewers)
 }
 
 // checkDateArg takes a date argument as a YYYY-MM-DD formatted string and

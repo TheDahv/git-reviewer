@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	gg "github.com/libgit2/git2go"
@@ -369,10 +370,15 @@ func (r *ContributionCounter) FindReviewers(paths []string) (string, error) {
 	topN := chooseTopN(maxStats, final)
 
 	var buffer bytes.Buffer
+	tw := tabwriter.NewWriter(&buffer, 0, 8, 1, '\t', 0)
+
+	fmt.Fprintln(tw, "Reviewer\tExperience")
+	fmt.Fprintln(tw, "--------\t----------")
+
 	for i := range topN {
-		buffer.WriteString(topN[i].String())
-		buffer.WriteString("\n")
+		fmt.Fprintf(tw, "%s\t%.2f%%\n", topN[i].Reviewer, topN[i].Percentage*100.0)
 	}
+	tw.Flush()
 
 	return buffer.String(), nil
 }
