@@ -293,13 +293,12 @@ func considerPath(path string, opts *ContributionCounter) bool {
 // by percentage of owned lines of all lines in changed file.
 func (r *ContributionCounter) FindReviewers(paths []string) (string, error) {
 	var (
-		rg                 runGuard
-		since              time.Time
-		final              Stats
-		opts               gg.BlameOptions
-		totalLines         uint16
-		linesByCommiter    = make(map[string]uint16)
-		commitersByPercent = make(map[string]float64)
+		rg              runGuard
+		since           time.Time
+		final           Stats
+		opts            gg.BlameOptions
+		totalLines      uint16
+		linesByCommiter = make(map[string]float64)
 	)
 
 	mm, _ := readMailmap()
@@ -343,7 +342,7 @@ func (r *ContributionCounter) FindReviewers(paths []string) (string, error) {
 				}
 
 				k := reviewerKey(h.OrigSignature, mm)
-				linesByCommiter[k] += h.LinesInHunk
+				linesByCommiter[k] += float64(h.LinesInHunk)
 				totalLines += h.LinesInHunk
 			}
 
@@ -353,12 +352,14 @@ func (r *ContributionCounter) FindReviewers(paths []string) (string, error) {
 
 	// Calculate percentage of "ownership" by percent of all lines touched
 	for commiter, lines := range linesByCommiter {
-		commitersByPercent[commiter] = float64(lines) / float64(totalLines)
+		// Calculate percent of lines touched in-place
+		lines := lines
+		linesByCommiter[commiter] = lines / float64(totalLines)
 	}
 
-	final = make(Stats, len(commitersByPercent))
+	final = make(Stats, len(linesByCommiter))
 	idx := 0
-	for c, p := range commitersByPercent {
+	for c, p := range linesByCommiter {
 		final[idx] = &Stat{c, p}
 		idx++
 	}
