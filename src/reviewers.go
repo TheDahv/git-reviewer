@@ -5,6 +5,7 @@ import (
 	"container/heap"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -49,13 +50,11 @@ func (s Stats) Len() int {
 	return len(s)
 }
 
-// Less sorts Stats by percentage of "owned" lines per collaborator. This
-// implementation bakes in a reverse order, such that higher percentage values
-// are sorted first.
+// Less sorts Stats by percentage of "owned" lines per collaborator.
 func (s Stats) Less(i, j int) bool {
 	// This behavior determines the priority order when Stats is Heapified.
 	// We want Pop to give us the highest, not lowest, priority.
-	return s[i].Percentage > s[j].Percentage
+	return s[i].Percentage < s[j].Percentage
 }
 
 // Swap moves elements around to their proper location in the heap
@@ -293,13 +292,12 @@ func considerPath(path string, opts *ContributionCounter) bool {
 // by percentage of owned lines of all lines in changed file.
 func (r *ContributionCounter) FindReviewers(paths []string) (string, error) {
 	var (
-		rg                 runGuard
-		since              time.Time
-		final              Stats
-		opts               gg.BlameOptions
-		totalLines         uint16
-		linesByCommiter    = make(map[string]uint16)
-		commitersByPercent = make(map[string]float64)
+		rg              runGuard
+		since           time.Time
+		final           Stats
+		opts            gg.BlameOptions
+		totalLines      uint16
+		linesByCommiter = make(map[string]float64)
 	)
 
 	mm, _ := readMailmap()
@@ -343,7 +341,7 @@ func (r *ContributionCounter) FindReviewers(paths []string) (string, error) {
 				}
 
 				k := reviewerKey(h.OrigSignature, mm)
-				linesByCommiter[k] += h.LinesInHunk
+				linesByCommiter[k] += float64(h.LinesInHunk)
 				totalLines += h.LinesInHunk
 			}
 
@@ -353,12 +351,14 @@ func (r *ContributionCounter) FindReviewers(paths []string) (string, error) {
 
 	// Calculate percentage of "ownership" by percent of all lines touched
 	for commiter, lines := range linesByCommiter {
-		commitersByPercent[commiter] = float64(lines) / float64(totalLines)
+		// Calculate percent of lines touched in-place
+		lines := lines
+		linesByCommiter[commiter] = lines / float64(totalLines)
 	}
 
-	final = make(Stats, len(commitersByPercent))
+	final = make(Stats, len(linesByCommiter))
 	idx := 0
-	for c, p := range commitersByPercent {
+	for c, p := range linesByCommiter {
 		final[idx] = &Stat{c, p}
 		idx++
 	}
@@ -406,17 +406,23 @@ func reviewerKey(sig *gg.Signature, mm mailmap) string {
 
 // chooseTopN consumes the greatest 'n' Stat objects from a Stats list.
 func chooseTopN(n int, s Stats) Stats {
-	top := make(Stats, n)
-	ti := 0
+	var top Stats
+	heap.Init(&top)
 
-	heap.Init(&s)
-	for i := 0; i < n; i++ {
-		val := heap.Pop(&s)
-		if val != nil {
-			top[ti] = val.(*Stat)
-			ti++
+	for _, stat := range s {
+		stat := stat
+
+		if top.Len() < n || stat.Percentage > top[0].Percentage {
+			// Replace the largest item in the heap with this one
+			// This way our heap never grows larger than it needs to be
+			if top.Len() == n {
+				heap.Pop(&top)
+			}
+
+			heap.Push(&top, stat)
 		}
 	}
+	sort.Sort(sort.Reverse(top))
 
 	return top
 }
