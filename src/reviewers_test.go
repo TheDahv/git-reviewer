@@ -287,3 +287,30 @@ func TestDefaultIgnoreExtensions(t *testing.T) {
 		t.Error("Expected JSON files to be ignored when other ignores defined")
 	}
 }
+
+func TestChooseTopN(t *testing.T) {
+	var (
+		stats      Stats
+		srcSize    = 10000
+		outputSize = 5
+	)
+
+	for i := 0; i < srcSize; i++ {
+		stats = append(stats, &Stat{"", float64(i)})
+	}
+
+	actual := chooseTopN(outputSize, stats)
+	if l := len(actual); l != outputSize {
+		t.Errorf("chooseTopN result had %d elements, expected %d\n",
+			l, srcSize)
+	}
+
+	for i := 0; i < outputSize; i++ {
+		expected := (float64(srcSize-1) - float64(i))
+		if p := actual[i].Percentage; p != expected {
+			t.Errorf("Percentage at index %d is %f, expected %f\n",
+				i, p, expected)
+		}
+	}
+
+}
