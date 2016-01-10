@@ -12,7 +12,7 @@ import (
 	gr "github.com/thedahv/git-reviewer/src"
 )
 
-const version = "0.0.2"
+const version = "0.0.3"
 
 // dateRx helps us ensure date arguments confirm to YYYY-MM-DD format
 var dateRx *regexp.Regexp
