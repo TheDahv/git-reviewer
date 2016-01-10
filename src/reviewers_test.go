@@ -36,7 +36,7 @@ func TestBranchBehind(t *testing.T) {
 	repo := prepareRepo(t)
 	defer repo.Free()
 
-	r := Reviewer{Repo: repo}
+	r := ContributionCounter{Repo: repo}
 
 	// Get current branch
 	rg.maybeRun(func() {
@@ -222,7 +222,7 @@ func TestFindFiles(t *testing.T) {
 		repo := prepareRepo(t)
 		defer repo.Free()
 
-		r := Reviewer{Repo: repo}
+		r := ContributionCounter{Repo: repo}
 
 		lines, err := r.FindFiles()
 		if err != nil {
@@ -261,24 +261,24 @@ func TestFindFiles(t *testing.T) {
 
 func TestDefaultIgnoreExtensions(t *testing.T) {
 	// All defaults
-	if considerExt("myfile.svg", &Reviewer{}) {
+	if considerExt("myfile.svg", &ContributionCounter{}) {
 		t.Error("Expected SVG files to be ignored by default")
 	}
 
-	if considerExt("myfile.json", &Reviewer{}) {
+	if considerExt("myfile.json", &ContributionCounter{}) {
 		t.Error("Expected JSON files to be ignored by default")
 	}
 
-	if considerExt("myfile.nock", &Reviewer{}) {
+	if considerExt("myfile.nock", &ContributionCounter{}) {
 		t.Error("Expected NOCK files to be ignored by default")
 	}
 
-	if considerExt("myfile.xml", &Reviewer{}) {
+	if considerExt("myfile.xml", &ContributionCounter{}) {
 		t.Error("Expected XML files to be ignored by default")
 	}
 
 	// Defaults in addition to extra extensions
-	opts := &Reviewer{IgnoredExtensions: []string{"coffee"}}
+	opts := &ContributionCounter{IgnoredExtensions: []string{"coffee"}}
 	if considerExt("myfile.coffee", opts) {
 		t.Error("Expected coffee files to be explicitly ignored")
 	}
