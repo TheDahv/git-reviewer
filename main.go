@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	gg "github.com/libgit2/git2go"
 	gr "github.com/thedahv/git-reviewer/src"
+	gogit "gopkg.in/src-d/go-git.v4"
 )
 
 const version = "0.0.3"
@@ -69,7 +69,7 @@ func main() {
 		return
 	}
 
-	repo, err := gg.OpenRepository(dir)
+	repo, err := gogit.PlainOpen(dir)
 	if err != nil {
 		fmt.Printf("Unable to open repository: %v\n", err)
 		return
@@ -121,6 +121,7 @@ func main() {
 	}
 
 	// Find the best reviewers for these files.
+	//reviewers, err := r.FindReviewers(files)
 	reviewers, err := r.FindReviewers(files)
 	if err != nil {
 		fmt.Printf("There was an error finding reviewers: %v\n", err)

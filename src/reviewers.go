@@ -3,20 +3,20 @@ package gitreviewers
 import (
 	"bytes"
 	"container/heap"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"text/tabwriter"
-	"time"
 
-	gg "github.com/libgit2/git2go"
+	gogit "gopkg.in/src-d/go-git.v4"
+	"gopkg.in/src-d/go-git.v4/plumbing"
+	"gopkg.in/src-d/go-git.v4/plumbing/object"
 )
 
 // ContributionCounter represents a repository and options describing how to
 // count changes and attribute them to collaborators to determine experience.
 type ContributionCounter struct {
-	Repo              *gg.Repository
+	Repo              *gogit.Repository
 	ShowFiles         bool
 	Verbose           bool
 	Since             string
@@ -99,43 +99,41 @@ var defaultIgnoreExt = []string{
 // by comparing the current branch HEAD reference to that of the local ref of
 // the master branch.
 func (r *ContributionCounter) BranchBehind() (bool, error) {
-	if r.Repo == nil {
-		return false, errors.New("repo not initialized")
-	}
-
 	var (
-		rg      runGuard
-		mBranch *gg.Branch
-		mCom    *gg.Commit
-		hRef    *gg.Reference
-		hCom    *gg.Commit
-		behind  bool
+		rg     runGuard
+		m      *plumbing.Reference
+		mObj   *object.Commit
+		h      *plumbing.Reference
+		hObj   *object.Commit
+		behind bool
 	)
-
-	defer func() {
-		objs := [...]freeable{mBranch, mCom, hRef, hCom}
-		for _, obj := range objs {
-			obj.Free()
-		}
-	}()
 
 	rg.maybeRunMany(
 		func() {
-			mBranch, rg.err = r.Repo.LookupBranch("master", gg.BranchLocal)
+			m, rg.err = r.Repo.Reference(plumbing.Master, true)
+			rg.msg = "issue opening master reference"
 		},
 		func() {
-			mCom, rg.err = r.Repo.LookupCommit(mBranch.Reference.Target())
+			h, rg.err = r.Repo.Reference(plumbing.HEAD, true)
+			rg.msg = "issue opening HEAD reference"
 		},
 		func() {
-			hRef, rg.err = r.Repo.Head()
+			mObj, rg.err = r.Repo.CommitObject(m.Hash())
+			rg.msg = "issue opening master commit"
 		},
 		func() {
-			hCom, rg.err = r.Repo.LookupCommit(hRef.Target())
+			hObj, rg.err = r.Repo.CommitObject(h.Hash())
+			rg.msg = "issue opening HEAD commit"
 		},
 		func() {
-			behind = hCom.Committer().When.Before(mCom.Committer().When)
+			behind = hObj.Committer.When.Before(mObj.Committer.When)
+			rg.msg = "issue comparing commit dates"
 		},
 	)
+
+	if rg.err != nil && rg.msg != "" && r.Verbose {
+		fmt.Printf("Error comparing branches: '%s'\n", rg.msg)
+	}
 
 	return behind, rg.err
 }
@@ -145,84 +143,63 @@ func (r *ContributionCounter) BranchBehind() (bool, error) {
 func (r *ContributionCounter) FindFiles() ([]string, error) {
 	var (
 		rg      runGuard
+		m       *plumbing.Reference
+		mc      *object.Commit
+		h       *plumbing.Reference
+		hc      *object.Commit
+		mt      *object.Tree
+		ht      *object.Tree
+		changes object.Changes
 		paths   []string
-		mBranch *gg.Branch
-		hRef    *gg.Reference
-		hCom    *gg.Commit
-		mCom    *gg.Commit
-		mTree   *gg.Tree
-		hTree   *gg.Tree
-		opts    gg.DiffOptions
-		diff    *gg.Diff
 	)
 
-	if r.Repo == nil {
-		return paths, errors.New("repo not initialized")
-	}
-
-	defer func() {
-		objs := [...]freeable{mBranch, hRef, hCom, mCom, mTree, hTree}
-
-		for _, obj := range objs {
-			if obj != nil {
-				obj.Free()
-			}
-		}
-
-		if err := diff.Free(); err != nil && r.Verbose {
-			fmt.Printf("Issue cleaning up diff: '%s'\n", err)
-		}
-	}()
+	set := make(map[string]bool)
 
 	rg.maybeRunMany(
 		func() {
-			mBranch, rg.err = r.Repo.LookupBranch("master", gg.BranchLocal)
-			rg.msg = "issue opening master branch"
+			m, rg.err = r.Repo.Reference(plumbing.Master, true)
+			rg.msg = "issue opening master ref"
 		},
 		func() {
-			mCom, rg.err = r.Repo.LookupCommit(mBranch.Reference.Target())
-			rg.msg = "issue opening commit at master"
+			mc, rg.err = r.Repo.CommitObject(m.Hash())
+			rg.msg = "issue opening master commit"
 		},
 		func() {
-			hRef, rg.err = r.Repo.Head()
-			rg.msg = "issue opening repo at HEAD"
-		},
-		func() {
-			hCom, rg.err = r.Repo.LookupCommit(hRef.Target())
-			rg.msg = "issue opening commit at HEAD"
-		},
-		func() {
-			mTree, rg.err = mCom.Tree()
+			mt, rg.err = mc.Tree()
 			rg.msg = "issue opening tree at master"
 		},
 		func() {
-			hTree, rg.err = hCom.Tree()
+			h, rg.err = r.Repo.Reference(plumbing.HEAD, true)
+			rg.msg = "issue opening HEAD ref"
+		},
+		func() {
+			hc, rg.err = r.Repo.CommitObject(h.Hash())
+			rg.msg = "issue opening HEAD commit"
+		},
+		func() {
+			ht, rg.err = hc.Tree()
 			rg.msg = "issue opening tree at HEAD"
 		},
 		func() {
-			opts, rg.err = gg.DefaultDiffOptions()
-			rg.msg = "issue creating diff options"
+			changes, rg.err = object.DiffTree(mt, ht)
+			rg.msg = "issue diffing master and head trees"
 		},
 		func() {
-			diff, rg.err = r.Repo.DiffTreeToTree(mTree, hTree, &opts)
-			rg.msg = "issue finding diff"
-		},
-		func() {
-			diff.ForEach(func(file gg.DiffDelta, progress float64) (
-				gg.DiffForEachHunkCallback, error) {
-
-				// Only include path if it passes all filters
-				path := file.OldFile.Path
-				if considerExt(path, r) && considerPath(path, r) {
-					paths = append(paths, path)
+			for _, ch := range changes {
+				n := ch.To.Name
+				if considerExt(n, r) && considerPath(n, r) {
+					set[n] = true
 				}
-				return nil, nil
-			}, gg.DiffDetailFiles)
+			}
 		},
 	)
 
 	if rg.err != nil && rg.msg != "" && r.Verbose {
 		fmt.Printf("Error finding diff files: '%s'\n", rg.msg)
+	}
+
+	for path := range set {
+		paths = append(paths, path)
 	}
 
 	return paths, rg.err
@@ -292,73 +269,53 @@ func considerPath(path string, opts *ContributionCounter) bool {
 // by percentage of owned lines of all lines in changed file.
 func (r *ContributionCounter) FindReviewers(paths []string) (string, error) {
 	var (
-		rg              runGuard
-		since           time.Time
-		final           Stats
-		opts            gg.BlameOptions
-		totalLines      uint16
-		linesByCommiter = make(map[string]float64)
+		rg               runGuard
+		final            Stats
+		totalLines       uint16
+		linesByCommitter = make(map[string]float64)
+		m                *plumbing.Reference
+		mc               *object.Commit
 	)
 
 	mm, _ := readMailmap()
 
-	if len(r.Since) > 0 {
-		var err error
-		since, err = time.Parse("2006-01-02", r.Since)
-		if err != nil {
-			if r.Verbose {
-				fmt.Println("Unable to parse 'since'")
-			}
-			return "", err
-		}
-	} else {
-		// Calculate 6 months ago from today's date and set the 'since' argument
-		since = time.Now().AddDate(0, -6, 0)
-	}
-
-	rg.maybeRun(func() {
-		opts, rg.err = gg.DefaultBlameOptions()
-		rg.msg = "Issue creating blame options"
-	})
-
-	// Obtain a blame for each file in the diff and count up experience by lines,
-	// discarding hunks from comits older than the 'since' threshold.
-	rg.maybeRun(func() {
-		for _, p := range paths {
-			b, err := r.Repo.BlameFile(p, &opts)
-			if err != nil {
-				continue
-			}
-
-			cnt := b.HunkCount()
-			for i := 0; i < cnt; i++ {
-				h, err := b.HunkByIndex(i)
-
-				// Skip for errors or for hunks that are older than our window of
-				// consideration.
-				if err != nil || h.OrigSignature.When.Before(since) {
+	// Get the master commit so we can determine what the experience was *before*
+	// the author got to the file.
+	rg.maybeRunMany(
+		func() {
+			m, rg.err = r.Repo.Reference(plumbing.Master, true)
+			rg.msg = "unable to find ref for master"
+		},
+		func() {
+			mc, rg.err = r.Repo.CommitObject(m.Hash())
+			rg.msg = "unable to find commit for master"
+		},
+		func() {
+			for _, p := range paths {
+				b, err := gogit.Blame(mc, p)
+				if err != nil {
+					// TODO Swallowing blame errors for now. Handle this somehow
 					continue
 				}
 
-				k := reviewerKey(h.OrigSignature, mm)
-				linesByCommiter[k] += float64(h.LinesInHunk)
-				totalLines += h.LinesInHunk
+				for _, l := range b.Lines {
+					k := reviewerKey(l.Author, mm)
+					linesByCommitter[k] += 1
+					totalLines += 1
+				}
 			}
+		},
+	)
 
-			b.Free()
-		}
-	})
-
-	// Calculate percentage of "ownership" by percent of all lines touched
-	for commiter, lines := range linesByCommiter {
+	for author, lines := range linesByCommitter {
 		// Calculate percent of lines touched in-place
 		lines := lines
-		linesByCommiter[commiter] = lines / float64(totalLines)
+		linesByCommitter[author] = lines / float64(totalLines)
 	}
 
-	final = make(Stats, len(linesByCommiter))
+	final = make(Stats, len(linesByCommitter))
 	idx := 0
-	for c, p := range linesByCommiter {
+	for c, p := range linesByCommitter {
 		final[idx] = &Stat{c, p}
 		idx++
 	}
@@ -383,25 +340,13 @@ func (r *ContributionCounter) FindReviewers(paths []string) (string, error) {
 	return buffer.String(), nil
 }
 
-// reviewerKey returns the formatted name and email for a collaborator on the
-// signature of a git object. It uses the provided mailmap to determine the
-// normalized name and email, or uses the original name and email on the
-// signature if not contained in the mailmap.
-func reviewerKey(sig *gg.Signature, mm mailmap) string {
-	var (
-		name, email string
-		ok          bool
-	)
-
-	if name, ok = mm[sig.Name]; !ok {
-		name = sig.Name
+// reviewerKey resolves an author email to its canonical in the mailmap
+func reviewerKey(email string, mm mailmap) string {
+	if e, ok := mm[email]; ok {
+		email = e
 	}
 
-	if email, ok = mm[sig.Email]; !ok {
-		email = sig.Email
-	}
-
-	return fmt.Sprintf("%s <%s>", name, email)
+	return email
 }
 
 // chooseTopN consumes the greatest 'n' Stat objects from a Stats list.
