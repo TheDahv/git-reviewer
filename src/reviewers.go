@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"container/heap"
 	"fmt"
+	"os"
 	"sort"
+	"os/user"
 	"strings"
 	"text/tabwriter"
 
@@ -24,6 +26,7 @@ type ContributionCounter struct {
 	OnlyExtensions    []string
 	IgnoredPaths      []string
 	OnlyPaths         []string
+	Mailmap           mailmap
 }
 
 // Stat contains information about a collaborator and the total "experience"
@@ -93,6 +96,46 @@ var defaultIgnoreExt = []string{
 	"json",
 	"nock",
 	"xml",
+}
+
+// BuildMailmap builds a map of author name/email combinations to determine the
+// canonical author for a given line or commit. This is useful if an author
+// worked on a project under multiple identiies but we still want to attribute
+// all contributions to the same person.
+//
+// It attempts to open and read from any of the paths specified. If none are
+// specified, it will attempt to open ~/.mailmap and read from there.
+//
+// It will skip over any files it is unable to open without error. If none are
+// parsed, it will result in an empty mailmap.
+func (r *ContributionCounter) BuildMailmap(paths ...string) {
+	// If no paths specified, attempt by guessing that it will be in the user's
+	// home path.
+	if len(paths) == 0 {
+		if path, err := guessUserMailmap(); err == nil {
+			paths = append(paths, path)
+		}
+	}
+
+	if mm, err := readMailmap(paths); err == nil {
+		r.Mailmap = mm
+	}
+}
+
+// Attempt to guess the user's mailmap path by looking for it in the home
+// directory.
+func guessUserMailmap() (string, error) {
+	u, err := user.Current()
+	if err != nil {
+		return "", err
+	}
+	path := u.HomeDir + "/.mailmap"
+	if f, err := os.Open(path); err == nil {
+		f.Close()
+		return path, nil
+	} else {
+		return "", err
+	}
 }
 
 // BranchBehind determines if the current branch is "behind"

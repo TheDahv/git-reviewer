@@ -3,11 +3,8 @@ package gitreviewers
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"io"
 	"os"
-
-	gg "github.com/libgit2/git2go"
 )
 
 // runGuard supports programming with the "sticky errors" pattern, allowing
@@ -48,70 +45,14 @@ func (rg *runGuard) maybeRunMany(fns ...func()) {
 
 type mailmap map[string]string
 
-func readMailmap() (mailmap, error) {
-	var (
-		rg  runGuard
-		cwd string
-		mm  = make(mailmap)
-	)
+func readMailmap(paths []string) (mailmap, error) {
+	mm := make(mailmap)
 
-	rg.maybeRun(func() {
-		var err error
-
-		cwd, err = os.Getwd()
-		if err != nil {
-			rg.err = err
-			rg.msg = "Error determining current working directory"
+	for _, p := range paths {
+		if f, err := os.Open(p); err == nil {
+			readMailmapFromSource(mm, f)
+			f.Close()
 		}
-	})
-
-	// Check for profile mailmap
-	rg.maybeRun(func() {
-		cp, err := gg.ConfigFindGlobal()
-		if err != nil {
-			fmt.Printf("Error finding global config: %v\n", err)
-			return
-		}
-
-		conf, err := gg.OpenOndisk(&gg.Config{}, cp)
-		if err != nil {
-			return
-		}
-		defer conf.Free()
-
-		path, err := conf.LookupString("mailmap.file")
-		if err != nil {
-			fmt.Printf("Error lookup up mailmap file %v\n", err)
-			return
-		}
-
-		f, err := os.Open(path)
-		defer f.Close()
-		if err != nil {
-			return
-		}
-
-		if err := readMailmapFromSource(mm, f); err != nil {
-			return
-		}
-	})
-
-	// Parse project mailmap last so it overrides
-	rg.maybeRun(func() {
-		f, err := os.Open(cwd + ".mailmap")
-		defer f.Close()
-		if err != nil {
-			return
-		}
-
-		if err := readMailmapFromSource(mm, f); err != nil {
-			return
-		}
-	})
-
-	// Check for any errors that might have happened
-	if rg.err != nil {
-		return nil, rg.err
 	}
 
 	return mm, nil
@@ -163,7 +104,11 @@ func readMailmapFromSource(mm mailmap, src io.Reader) error {
 		// TODO Implement repo-abbrev parsing. I have no idea what that is
 	}
 
-	return scanner.Err()
+	if err := scanner.Err(); err == nil || err == io.EOF {
+		return nil
+	} else {
+		return err
+	}
 }
 
 func parseMailmapLine(line []byte, offset int) (name string, email string, right int) {

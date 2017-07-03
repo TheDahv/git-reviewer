@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/user"
 	"regexp"
 	"strings"
 
@@ -85,6 +86,17 @@ func main() {
 		IgnoredPaths:      ignoredPaths,
 		OnlyPaths:         onlyPaths,
 	}
+
+	// TODO take mailmap paths from command args
+	var mailmapPaths []string
+	if u, err := user.Current(); err == nil {
+		mailmapPaths = append(mailmapPaths, u.HomeDir+"/.mailmap")
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		mailmapPaths = append(mailmapPaths, cwd+"/.mailmap")
+		mailmapPaths = append(mailmapPaths, cwd+"/mailmap")
+	}
+	r.BuildMailmap(mailmapPaths...)
 
 	// Determine if branch is reviewable
 	if behind, err := r.BranchBehind(); behind || err != nil {
