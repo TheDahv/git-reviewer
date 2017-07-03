@@ -1,15 +1,20 @@
 package gitreviewers
 
 import (
+	"bufio"
 	"bytes"
 	"container/heap"
 	"fmt"
 	"os"
-	"sort"
+	"os/exec"
 	"os/user"
+	"sort"
 	"strings"
+	"sync"
 	"text/tabwriter"
+	"time"
 
+	"github.com/pkg/errors"
 	gogit "gopkg.in/src-d/go-git.v4"
 	"gopkg.in/src-d/go-git.v4/plumbing"
 	"gopkg.in/src-d/go-git.v4/plumbing/object"
@@ -143,12 +148,12 @@ func guessUserMailmap() (string, error) {
 // the master branch.
 func (r *ContributionCounter) BranchBehind() (bool, error) {
 	var (
-		rg     runGuard
-		m      *plumbing.Reference
-		mObj   *object.Commit
+		behind bool
 		h      *plumbing.Reference
 		hObj   *object.Commit
-		behind bool
+		m      *plumbing.Reference
+		mObj   *object.Commit
+		rg     runGuard
 	)
 
 	rg.maybeRunMany(
@@ -185,15 +190,15 @@ func (r *ContributionCounter) BranchBehind() (bool, error) {
 // in this branch with respect to "master".
 func (r *ContributionCounter) FindFiles() ([]string, error) {
 	var (
-		rg      runGuard
-		m       *plumbing.Reference
-		mc      *object.Commit
+		changes object.Changes
 		h       *plumbing.Reference
 		hc      *object.Commit
-		mt      *object.Tree
 		ht      *object.Tree
-		changes object.Changes
+		m       *plumbing.Reference
+		mc      *object.Commit
+		mt      *object.Tree
 		paths   []string
+		rg      runGuard
 	)
 
 	set := make(map[string]bool)
@@ -229,8 +234,11 @@ func (r *ContributionCounter) FindFiles() ([]string, error) {
 		},
 		func() {
 			for _, ch := range changes {
-				n := ch.To.Name
-				if considerExt(n, r) && considerPath(n, r) {
+				// Only keep the names that existed in "master" before the change.
+				// Otherwise we'll try to 'blame' files that don't exist in master if a
+				// file was created or renamed in the development branch.
+				n := ch.From.Name
+				if len(n) > 0 && considerExt(n, r) && considerPath(n, r) {
 					set[n] = true
 				}
 			}
@@ -310,45 +318,29 @@ func considerPath(path string, opts *ContributionCounter) bool {
 
 // FindReviewers returns up to 3 of the top reviewers information as determined
 // by percentage of owned lines of all lines in changed file.
+//
+// NOTE: This previously use go-git to create a blame object for each file in
+// 'paths', but the performance and concurrency errors proved to make this
+// unsuitable for this method. We're falling back to making and parsing shell
+// commands to Git to calculate blame statistics.
+//
+// Relevant src-d/go-git issues
+// - https://github.com/src-d/go-git/issues/457
+// - https://github.com/src-d/go-git/issues/458
 func (r *ContributionCounter) FindReviewers(paths []string) (string, error) {
-	var (
-		rg               runGuard
-		final            Stats
-		totalLines       uint16
-		linesByCommitter = make(map[string]float64)
-		m                *plumbing.Reference
-		mc               *object.Commit
-	)
+	var final Stats
 
-	mm, _ := readMailmap()
+	if len(r.Since) == 0 {
+		// Calculate 6 months ago from today's date and set the 'since' argument
+		r.Since = time.Now().AddDate(0, -6, 0).Format("2006-01-02")
+	}
 
-	// Get the master commit so we can determine what the experience was *before*
-	// the author got to the file.
-	rg.maybeRunMany(
-		func() {
-			m, rg.err = r.Repo.Reference(plumbing.Master, true)
-			rg.msg = "unable to find ref for master"
-		},
-		func() {
-			mc, rg.err = r.Repo.CommitObject(m.Hash())
-			rg.msg = "unable to find commit for master"
-		},
-		func() {
-			for _, p := range paths {
-				b, err := gogit.Blame(mc, p)
-				if err != nil {
-					// TODO Swallowing blame errors for now. Handle this somehow
-					continue
-				}
-
-				for _, l := range b.Lines {
-					k := reviewerKey(l.Author, mm)
-					linesByCommitter[k] += 1
-					totalLines += 1
-				}
-			}
-		},
-	)
+	// Example shell call:
+	// git blame -ce 9901bf79f808a8339b9820c08e209f5ec9649bda src/reviewers.go
+	linesByCommitter, totalLines, err := r.generateCounts(paths)
+	if err != nil {
+		return "", err
+	}
 
 	for author, lines := range linesByCommitter {
 		// Calculate percent of lines touched in-place
@@ -381,6 +373,209 @@ func (r *ContributionCounter) FindReviewers(paths []string) (string, error) {
 	tw.Flush()
 
 	return buffer.String(), nil
+}
+
+func (r *ContributionCounter) generateCounts(paths []string) (map[string]float64, uint16, error) {
+	var (
+		linesByCommitter = make(map[string]float64)
+		m                *plumbing.Reference
+		mc               *object.Commit
+		rg               runGuard
+		totalLines       uint16
+		wg               sync.WaitGroup
+	)
+
+	// Set up tracking for each of these files to be blamed concurrently with
+	// results from each reported on a single channel.
+	wg.Add(len(paths))
+	reporter := make(chan []string)
+
+	// Get the master commit so we can determine what the experience was *before*
+	// the author got to the file.
+	rg.maybeRunMany(
+		func() {
+			m, rg.err = r.Repo.Reference(plumbing.Master, true)
+			rg.msg = "unable to find ref for master"
+		},
+		func() {
+			mc, rg.err = r.Repo.CommitObject(m.Hash())
+			rg.msg = "unable to find commit for master"
+		},
+		func() {
+			for _, p := range paths {
+				go func(p string) {
+					// A separate run has already indicated a blame error. Skip
+					if rg.err != nil {
+						rg.msg = "Issue running git blame for " + p
+						return
+					}
+
+					err := r.runAndReport(p, m.Hash().String(), reporter)
+					// Report any errors to the rungroup so future goroutines don't
+					// attempt any further processsing.
+					if err != nil {
+						rg.err = err
+					}
+				}(p)
+			}
+		},
+	)
+
+	// Bail early from further processing if we couldn't run a git-blame for each
+	// path identified
+	if rg.err != nil {
+		if rg.msg != "" && r.Verbose {
+			fmt.Println("Error blaming changed files:", rg.msg)
+		}
+
+		return nil, 0, rg.err
+	}
+
+	// Collect all the git-blame line responses as they come in. This loop will
+	// continue as long as the reporter channel is open. We'll close the channel
+	// when all blame processes report they have finished.
+	go func() {
+		for attributions := range reporter {
+			for _, author := range attributions {
+				linesByCommitter[author]++
+				totalLines++
+			}
+			wg.Done()
+		}
+	}()
+
+	wg.Wait()
+	close(reporter)
+
+	return linesByCommitter, totalLines, nil
+}
+
+// runAndReport executes an external call to git to calculate blame statistics
+// for a file at a specific commit (usually "master" or whatever the base branch
+// is) and send extracted statistics to the 'reporter' channel.
+func (r *ContributionCounter) runAndReport(path string, rev string, reporter chan []string) error {
+	out, err := exec.Command("git", "blame", "-ce", rev, path).Output()
+	if err != nil {
+		return errors.Wrap(err, "unable to execute external git blame command")
+	}
+
+	scn := bufio.NewScanner(bytes.NewReader(out))
+	var attributions []string
+
+	for scn.Scan() {
+		if bi, err := parseBlameLine(scn.Bytes()); err == nil {
+			// r.Since is a string, not a date. However, since the format is just
+			// a "YYYY-MM-DD" string, we can rely on ASCII sorting and just compare
+			// the strings to determine if a line change was committed before or after
+			// our boundary
+			if r.Since > string(bi.date) {
+				continue
+			}
+
+			email := string(bi.email)
+			// Normalize scanned email based on what we found in the mailmap
+			if e, ok := r.Mailmap[email]; ok {
+				attributions = append(attributions, e)
+			} else {
+				attributions = append(attributions, email)
+			}
+		} else {
+			return errors.Wrap(err, "issue parsing a line in git blame output")
+		}
+	}
+
+	reporter <- attributions
+	return scn.Err()
+}
+
+// blameInfo holds anything we might be interested in reporting out of a git
+// blame shell command result
+type blameInfo struct {
+	email []byte
+	date  []byte
+}
+
+// parseBlameLine takes the bytes for one line of the output of running git
+// blame on the shell with the `-ce` options (that is, returning in a specific
+// machine format as well as returning the author email instead of name) and
+// extracts the relevant information into a blameInfo struct
+func parseBlameLine(line []byte) (blameInfo, error) {
+	// Format of blame result:
+	// somerev        (author@domain.com> YYYY-MM-DD HH:MM:SS -0700       3)stuff.
+	var (
+		bi    blameInfo
+		date  []byte
+		email []byte
+	)
+	rdr := bytes.NewReader(line)
+
+	// Scan over the rev
+	for {
+		if r, _, err := rdr.ReadRune(); err == nil {
+			if r == ' ' || r == '\t' {
+				rdr.UnreadRune()
+				break
+			}
+		} else {
+			return bi, errors.Wrap(err, "unable to read over rev")
+		}
+	}
+
+	// Scan over the whitespace gap
+	for {
+		r, _, err := rdr.ReadRune()
+		if err != nil {
+			return bi, errors.Wrap(err, "unable to skip whitespace before author")
+		}
+
+		if !(r == ' ' || r == '\t') {
+			rdr.UnreadRune()
+			break
+		}
+	}
+
+	// Read over author signature header
+	if r, _, _ := rdr.ReadRune(); r != '(' {
+		return bi, fmt.Errorf("expected opening parens of email")
+	}
+	if r, _, _ := rdr.ReadRune(); r != '<' {
+		return bi, fmt.Errorf("expected opening bracket of email")
+	}
+
+	// Scan the email bytes into place
+	for {
+		b, err := rdr.ReadByte()
+		if err != nil {
+			return bi, errors.Wrap(err, "unable to scan author email")
+		}
+
+		if b == '>' {
+			rdr.UnreadRune()
+			break
+		}
+
+		email = append(email, b)
+	}
+
+	// Read over the next space before reading the date
+	if r, _, err := rdr.ReadRune(); err != nil || !(r == ' ' || r == '\t') {
+		fmt.Println("Error reading expected space after email")
+		fmt.Println("Instead of space, got", string(r))
+		return bi, err
+	}
+
+	// Read the date into place (10 bytes for YYYY-MM-DD)
+	for i := 0; i < 10; i++ {
+		b, err := rdr.ReadByte()
+		if err != nil {
+			return bi, errors.Wrap(err, "unable to read date bytes")
+		}
+
+		date = append(date, b)
+	}
+
+	bi = blameInfo{email, date}
+	return bi, nil
 }
 
 // reviewerKey resolves an author email to its canonical in the mailmap
