@@ -13,7 +13,7 @@ import (
 	gogit "gopkg.in/src-d/go-git.v4"
 )
 
-const version = "0.0.3"
+const version = "0.0.4"
 
 // dateRx helps us ensure date arguments confirm to YYYY-MM-DD format
 var dateRx *regexp.Regexp
