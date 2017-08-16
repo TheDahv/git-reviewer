@@ -133,10 +133,15 @@ func main() {
 	}
 
 	// Find the best reviewers for these files.
-	//reviewers, err := r.FindReviewers(files)
 	reviewers, err := r.FindReviewers(files)
 	if err != nil {
-		fmt.Printf("There was an error finding reviewers: %v\n", err)
+		switch e := err.(type) {
+		case gr.NoReviewersErr:
+			fmt.Printf("Problem finding reviewers: %s", e.Help())
+			fmt.Println("Run git-reviwer again with the --since argument")
+		default:
+			fmt.Printf("There was an error finding reviewers: %v\n", err)
+		}
 		return
 	}
 

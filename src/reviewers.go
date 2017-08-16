@@ -364,6 +364,10 @@ func (r *ContributionCounter) FindReviewers(paths []string) (string, error) {
 	var buffer bytes.Buffer
 	tw := tabwriter.NewWriter(&buffer, 0, 8, 1, '\t', 0)
 
+	if len(topN) == 0 {
+		return "", noReviewersErr{}
+	}
+
 	fmt.Fprintln(tw, "Reviewer\tExperience")
 	fmt.Fprintln(tw, "--------\t----------")
 
@@ -608,4 +612,19 @@ func chooseTopN(n int, s Stats) Stats {
 	sort.Sort(sort.Reverse(top))
 
 	return top
+}
+
+type NoReviewersErr interface {
+	Error() string
+	Help() string
+}
+
+type noReviewersErr struct{}
+
+func (nre noReviewersErr) Error() string {
+	return "no reviewers found"
+}
+
+func (nre noReviewersErr) Help() string {
+	return "Try using a wider date range"
 }
